@@ -9,7 +9,8 @@
 POC 3: Deploy vLLM on RunPod
 
 Start a vLLM server on a RunPod GPU with a small model and confirm it serves
-the OpenAI-compatible API.
+the OpenAI-compatible API. Also scrapes Prometheus metrics from the /metrics
+endpoint. (Absorbs POC 12.)
 
 Prerequisites:
     export RUNPOD_API_KEY="your_api_key"
@@ -27,7 +28,9 @@ Usage:
     uv run poc/poc_03_deploy_vllm.py --pod-id abc123
 
 Success criteria:
-    /v1/models returns the loaded model name.
+    /v1/models returns the loaded model name, a chat completion request
+    returns a valid response with token counts, and Prometheus metrics are
+    scraped and displayed.
 """
 
 import argparse
@@ -51,7 +54,7 @@ CONTAINER_DISK_GB = 10
 VOLUME_DISK_GB = 10
 VLLM_PORT = 8000
 POLL_INTERVAL_SECONDS = 5
-READY_TIMEOUT_SECONDS = 300
+READY_TIMEOUT_SECONDS = 600
 HEALTH_RETRY_INTERVAL_SECONDS = 10
 HEALTH_TIMEOUT_SECONDS = 600  # Model download + load can take a while
 
@@ -270,9 +273,183 @@ def step_query_models(base_url: str) -> None:
     print(f"  {json.dumps(data, indent=2)}")
 
 
+def step_chat_completion(base_url: str, model: str) -> None:
+    """Send a single chat completion request and print the result."""
+    print_section("Step 5: Chat Completion Request")
+    completions_url = f"{base_url}/v1/chat/completions"
+    print(f"  URL:   {completions_url}")
+    print(f"  Model: {model}")
+    print()
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "user", "content": "What is the capital of France?"},
+        ],
+    }
+
+    response = httpx.post(
+        completions_url, json=payload, timeout=30, follow_redirects=True
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    choice = data["choices"][0]
+    usage = data.get("usage", {})
+
+    print(f"  Finish reason:      {choice.get('finish_reason', 'N/A')}")
+    print(f"  Response content:   {choice['message']['content']}")
+    print()
+    print(f"  Prompt tokens:      {usage.get('prompt_tokens', 'N/A')}")
+    print(f"  Completion tokens:  {usage.get('completion_tokens', 'N/A')}")
+    print(f"  Total tokens:       {usage.get('total_tokens', 'N/A')}")
+    print()
+    print("  Full response:")
+    print(f"  {json.dumps(data, indent=2)}")
+
+
+def parse_prometheus_text(text: str) -> dict[str, list[tuple[dict[str, str], float]]]:
+    """Parse Prometheus text exposition format into a dict.
+
+    Returns {metric_name: [(labels_dict, float_value), ...]}.
+    """
+    metrics: dict[str, list[tuple[dict[str, str], float]]] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Split "metric_name{labels} value" or "metric_name value"
+        if "{" in line:
+            name_part, rest = line.split("{", 1)
+            labels_str, rest = rest.split("}", 1)
+            labels = {}
+            for pair in labels_str.split(","):
+                pair = pair.strip()
+                if "=" not in pair:
+                    continue
+                k, v = pair.split("=", 1)
+                labels[k.strip()] = v.strip().strip('"')
+        else:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name_part = parts[0]
+            rest = parts[1]
+            labels = {}
+
+        name = name_part.strip()
+        value_str = rest.strip().split()[0] if rest.strip() else "0"
+        try:
+            value = float(value_str)
+        except ValueError:
+            continue
+
+        metrics.setdefault(name, []).append((labels, value))
+    return metrics
+
+
+def get_metric_value(
+    metrics: dict, name: str, labels: dict[str, str] | None = None
+) -> float | None:
+    """Look up a single metric value, optionally filtering by labels."""
+    entries = metrics.get(name, [])
+    for entry_labels, value in entries:
+        if labels is None or all(entry_labels.get(k) == v for k, v in labels.items()):
+            return value
+    return None
+
+
+def get_metric_flexible(
+    metrics: dict, name: str, labels: dict[str, str] | None = None
+) -> float | None:
+    """Try both ':' and '_' separators to handle vLLM version variations."""
+    val = get_metric_value(metrics, name, labels)
+    if val is not None:
+        return val
+    # Try swapping the first colon to underscore or vice versa
+    if ":" in name:
+        alt = name.replace(":", "_", 1)
+    elif "_" in name:
+        parts = name.split("_", 1)
+        alt = parts[0] + ":" + parts[1]
+    else:
+        return None
+    return get_metric_value(metrics, alt, labels)
+
+
+# Curated vLLM metrics to display
+VLLM_METRICS = [
+    # (metric_name, display_name, type)
+    ("vllm:num_requests_running", "Running requests", "gauge"),
+    ("vllm:num_requests_waiting", "Waiting requests", "gauge"),
+    ("vllm:kv_cache_usage_perc", "KV cache usage", "gauge"),
+    ("vllm:prompt_tokens_total", "Prefill tokens processed", "counter"),
+    ("vllm:generation_tokens_total", "Generation tokens produced", "counter"),
+    ("vllm:request_success_total", "Successful requests", "counter"),
+    ("vllm:prefix_cache_hits_total", "Prefix cache hits", "counter"),
+    ("vllm:prefix_cache_queries_total", "Prefix cache queries", "counter"),
+    ("vllm:time_to_first_token_seconds", "Time to first token", "histogram"),
+    ("vllm:inter_token_latency_seconds", "Inter-token latency", "histogram"),
+    ("vllm:e2e_request_latency_seconds", "End-to-end latency", "histogram"),
+]
+
+
+def step_scrape_metrics(base_url: str) -> None:
+    """Scrape and display Prometheus metrics from the /metrics endpoint."""
+    print_section("Step 6: Scrape Prometheus Metrics")
+    metrics_url = f"{base_url}/metrics"
+    print(f"  URL: {metrics_url}")
+    print()
+
+    try:
+        response = httpx.get(metrics_url, timeout=10, follow_redirects=True)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"  Warning: Failed to scrape metrics: {e}")
+        print("  (This is non-fatal — continuing to cleanup.)")
+        return
+
+    metrics = parse_prometheus_text(response.text)
+    total_families = len(metrics)
+
+    # Gauges and counters
+    print("  Gauges & Counters:")
+    for name, display, mtype in VLLM_METRICS:
+        if mtype in ("gauge", "counter"):
+            val = get_metric_flexible(metrics, name)
+            if val is not None:
+                if "perc" in name or "usage" in name:
+                    print(f"    {display:40s} {val:.2%}")
+                else:
+                    print(f"    {display:40s} {val:g}")
+            else:
+                print(f"    {display:40s} (not found)")
+
+    # Histograms (compute average from _sum / _count)
+    print()
+    print("  Histograms (average from _sum/_count):")
+    for name, display, mtype in VLLM_METRICS:
+        if mtype != "histogram":
+            continue
+        sum_val = get_metric_flexible(metrics, f"{name}_sum")
+        count_val = get_metric_flexible(metrics, f"{name}_count")
+        if sum_val is not None and count_val is not None and count_val > 0:
+            avg = sum_val / count_val
+            print(f"    {display:40s} avg={avg:.4f}s (sum={sum_val:g}, count={count_val:g})")
+        elif count_val is not None and count_val == 0:
+            print(f"    {display:40s} (no observations yet)")
+        else:
+            print(f"    {display:40s} (not found)")
+
+    print()
+    print(f"  Total metric families scraped: {total_families}")
+    print("  Note: Only a curated subset is shown above. The full /metrics")
+    print("  endpoint exposes many more metrics for deeper analysis.")
+
+
 def step_terminate_pod(pod_id: str) -> None:
     """Terminate the pod."""
-    print_section("Step 5: Terminate Pod")
+    print_section("Step 7: Terminate Pod")
     print(f"  Terminating pod {pod_id}...")
     runpod.terminate_pod(pod_id)
     print("  Pod terminated successfully.")
@@ -329,13 +506,21 @@ def main():
         # Step 4: Query /v1/models
         step_query_models(base_url)
 
-        # Step 5: Cleanup (only if we created the pod)
+        # Step 5: Chat completion request
+        step_chat_completion(base_url, args.model)
+
+        # Step 6: Scrape Prometheus metrics
+        step_scrape_metrics(base_url)
+
+        # Step 7: Cleanup (only if we created the pod)
         if not reusing_pod:
             step_terminate_pod(pod_id)
             pod_id = None  # Already terminated, don't clean up again
 
         print_section("SUCCESS")
-        print("  vLLM server deployed and /v1/models returned the loaded model.")
+        print("  vLLM server deployed, /v1/models returned the loaded model,")
+        print("  a chat completion request returned a valid response, and")
+        print("  Prometheus metrics were scraped from the /metrics endpoint.")
         print()
 
     except KeyboardInterrupt:

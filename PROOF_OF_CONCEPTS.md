@@ -6,9 +6,9 @@ Standalone Python scripts that validate individual building blocks of the projec
 
 The POCs have natural dependencies. A reasonable progression through vLLM first:
 
-**1 → 2 → 3 → 6 → 8 → 9 → 12 → 14**
+**1 → 2 → 3 → 5 → 6 → 10**
 
-Then branch to SGLang (4, 7, 13) and fill in the rest (5, 10, 11).
+Then branch to SGLang (4) and fill in the rest (7, 8).
 
 ---
 
@@ -44,77 +44,43 @@ Establish an HTTP connection from the local machine to a running RunPod pod.
 
 ---
 
-## Inference Server Deployment
+## Inference Server Deployment & Metrics
 
 ### POC 3: Deploy vLLM on RunPod ✅ Done
 
-Start a vLLM server on a RunPod GPU with a small model and confirm it serves the OpenAI-compatible API.
+Start a vLLM server on a RunPod GPU with a small model, confirm it serves the OpenAI-compatible API, send a chat completion request, and scrape Prometheus metrics.
 
-**Validates:** vLLM boots on RunPod, loads a model into GPU memory, and exposes its API endpoint.
+**Validates:** vLLM boots on RunPod, loads a model into GPU memory, exposes its API endpoint, produces a valid chat completion response, and exposes Prometheus metrics.
 
 **What the script does:**
 - Create a pod using a vLLM Docker image with a small model (e.g., a 7B quantized model)
 - Poll until the vLLM health endpoint responds
 - Print the available model(s) via the `/v1/models` endpoint
+- Send a non-streaming `/v1/chat/completions` request and print the response content, token usage, and finish reason
+- Scrape the `/metrics` endpoint and display a curated subset of Prometheus metrics (KV cache usage, request counts, latency histograms, prefix cache stats)
 
-**Success criteria:** `/v1/models` returns the loaded model name.
+**Success criteria:** `/v1/models` returns the loaded model name, a chat completion request returns a valid response with token counts, and Prometheus metrics are scraped and displayed.
 
 ### POC 4: Deploy SGLang on RunPod ✅ Done
 
 Same as POC 3 but with SGLang.
 
-**Validates:** SGLang boots on RunPod, loads a model, and exposes its API endpoint.
+**Validates:** SGLang boots on RunPod, loads a model, exposes its API endpoint, produces a valid chat completion response, and exposes Prometheus metrics.
 
 **What the script does:**
-- Create a pod using an SGLang Docker image with the same small model
+- Create a pod using an SGLang Docker image with the same small model (with `--enable-metrics`)
 - Poll until the SGLang health endpoint responds
 - Print the available model(s)
+- Send a non-streaming `/v1/chat/completions` request and print the response content, token usage, and finish reason
+- Scrape the `/metrics` endpoint and display a curated subset of Prometheus metrics (cache hit rate, request counts, latency histograms, throughput)
 
-**Success criteria:** The SGLang server responds and lists the loaded model.
-
-### POC 5: Model-to-GPU Fit Check
-
-Attempt to load a model onto a specific GPU and observe whether it fits in memory.
-
-**Validates:** Baseline understanding of which model/GPU pairings work, and what failure looks like when a model doesn't fit.
-
-**What the script does:**
-- Start a pod with a chosen GPU type
-- Launch vLLM (or SGLang) with a model that is expected to fit
-- Check that the server becomes healthy
-- Optionally repeat with a model that is too large and capture the error
-
-**Success criteria:** Healthy server for the fitting model; clear error message for the oversized model.
+**Success criteria:** The SGLang server responds, lists the loaded model, a chat completion request returns a valid response with token counts, and Prometheus metrics are scraped and displayed.
 
 ---
 
-## Single Request Round-Trip
+## Streaming & Client-Side Metrics
 
-### POC 6: Single Completion Request to vLLM
-
-Send one chat completion request from the local machine to a running vLLM server.
-
-**Validates:** Full network round-trip, OpenAI API compatibility, and that the model generates a coherent response.
-
-**What the script does:**
-- Send a non-streaming `/v1/chat/completions` request with a short prompt
-- Print the response content, token usage, and finish reason
-
-**Success criteria:** A complete response is returned with valid token counts.
-
-### POC 7: Single Completion Request to SGLang
-
-Same as POC 6 but targeting an SGLang server.
-
-**Validates:** SGLang's API compatibility with the same request format used for vLLM.
-
-**What the script does:**
-- Send a non-streaming `/v1/chat/completions` request to SGLang
-- Print the response content, token usage, and finish reason
-
-**Success criteria:** Response format matches vLLM's (or differences are documented).
-
-### POC 8: Streaming Response Handling
+### POC 5: Streaming Response Handling
 
 Send a streaming request and consume the SSE stream token-by-token.
 
@@ -127,11 +93,7 @@ Send a streaming request and consume the SSE stream token-by-token.
 
 **Success criteria:** Tokens arrive incrementally (not all at once), and the full response is assembled correctly.
 
----
-
-## Client-Side Metrics
-
-### POC 9: Measure TTFT and End-to-End Latency
+### POC 6: Measure TTFT and End-to-End Latency
 
 Capture time-to-first-token and total request duration for a single streaming request.
 
@@ -145,7 +107,7 @@ Capture time-to-first-token and total request duration for a single streaming re
 
 **Success criteria:** TTFT is noticeably less than end-to-end latency. Values are in a plausible range (TTFT in tens/hundreds of ms, total in seconds).
 
-### POC 10: Measure Inter-Token Latency
+### POC 7: Measure Inter-Token Latency
 
 Record the arrival time of each token during a streaming response and compute the distribution of time-between-tokens.
 
@@ -158,7 +120,7 @@ Record the arrival time of each token during a streaming response and compute th
 
 **Success criteria:** Inter-token latencies are relatively consistent (low variance), with values typically in the single-digit to tens-of-ms range.
 
-### POC 11: Measure Tokens Per Second
+### POC 8: Measure Tokens Per Second
 
 Count output tokens and divide by generation time to get throughput for a single request.
 
@@ -174,36 +136,15 @@ Count output tokens and divide by generation time to get throughput for a single
 
 ---
 
-## Server-Side / GPU Metrics
+## Server-Side GPU Metrics
 
-### POC 12: Read Prometheus Metrics from vLLM
+### POC 9: Model-to-GPU Fit Check — Skipped
 
-Scrape the vLLM Prometheus endpoint and parse the available metrics.
+~~Attempt to load a model onto a specific GPU and observe whether it fits in memory.~~
 
-**Validates:** The metrics endpoint is accessible from the local machine, and the available metrics are understood.
+Skipped — not needed for the current benchmarking workflow.
 
-**What the script does:**
-- Send a GET request to vLLM's `/metrics` endpoint
-- Parse the Prometheus text format
-- Print all metric names and their current values
-- Highlight KV cache and batch-related metrics if present
-
-**Success criteria:** Metrics are returned and parseable. KV cache utilization metrics are present.
-
-### POC 13: Read Prometheus Metrics from SGLang
-
-Same as POC 12 but for SGLang.
-
-**Validates:** SGLang's metrics endpoint works and the available metrics are documented.
-
-**What the script does:**
-- Scrape SGLang's metrics endpoint
-- Parse and print all metric names and values
-- Note any differences from vLLM's metric set
-
-**Success criteria:** Metrics are returned. Differences from vLLM's metrics are identified.
-
-### POC 14: GPU Utilization Snapshot via nvidia-smi
+### POC 10: GPU Utilization Snapshot via nvidia-smi
 
 Run `nvidia-smi` on the pod during inference and capture GPU state.
 
