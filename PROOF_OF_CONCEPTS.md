@@ -14,7 +14,7 @@ Then branch to SGLang (4, 7, 13) and fill in the rest (5, 10, 11).
 
 ## Infrastructure
 
-### POC 1: RunPod API Basics
+### POC 1: RunPod API Basics ✅ Done
 
 Programmatically create, start, stop, and terminate a RunPod GPU pod using their API.
 
@@ -29,7 +29,7 @@ Programmatically create, start, stop, and terminate a RunPod GPU pod using their
 
 **Success criteria:** Pod goes through the full lifecycle (create → running → stopped → terminated) without manual intervention.
 
-### POC 2: RunPod Connectivity
+### POC 2: RunPod Connectivity ✅ Done
 
 Establish an HTTP connection from the local machine to a running RunPod pod.
 
@@ -46,7 +46,7 @@ Establish an HTTP connection from the local machine to a running RunPod pod.
 
 ## Inference Server Deployment
 
-### POC 3: Deploy vLLM on RunPod
+### POC 3: Deploy vLLM on RunPod ✅ Done
 
 Start a vLLM server on a RunPod GPU with a small model and confirm it serves the OpenAI-compatible API.
 
@@ -59,7 +59,7 @@ Start a vLLM server on a RunPod GPU with a small model and confirm it serves the
 
 **Success criteria:** `/v1/models` returns the loaded model name.
 
-### POC 4: Deploy SGLang on RunPod
+### POC 4: Deploy SGLang on RunPod ✅ Done
 
 Same as POC 3 but with SGLang.
 
