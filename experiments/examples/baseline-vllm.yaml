@@ -1,0 +1,16 @@
+extends: "../base/vllm-defaults.yaml"
+
+name: "baseline-vllm-a100"
+description: "Baseline vLLM latency on A100-80GB"
+
+model:
+  name: "meta-llama/Meta-Llama-3-8B-Instruct"
+
+infrastructure:
+  gpu_type: "A100-80GB"
+
+workload:
+  type: "single"
+  requests:
+    source: "../../prompts/baseline.jsonl"
+    count: 50
