@@ -19,6 +19,7 @@ GPU_PRICING: dict[str, tuple[float, float]] = {
     "A40": (0.79, 1.24),
     "RTX 4090": (0.69, 0.99),
     "RTX 3090": (0.44, 0.69),
+    "RTX 4000 Ada": (0.29, 0.49),
 }
 
 # Maps user-facing config names to RunPod SDK gpu_type_id strings.
@@ -31,6 +32,7 @@ GPU_TYPE_TO_RUNPOD_ID: dict[str, str] = {
     "A40": "NVIDIA A40",
     "RTX 4090": "NVIDIA GeForce RTX 4090",
     "RTX 3090": "NVIDIA GeForce RTX 3090",
+    "RTX 4000 Ada": "NVIDIA RTX 4000 Ada Generation",
 }
 
 _STALENESS_THRESHOLD_DAYS = 30

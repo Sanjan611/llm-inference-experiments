@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import yaml
 from typer.testing import CliRunner
 
 from llm_inf_bench.cli import app
+from llm_inf_bench.metrics.collector import RequestResult
 
 runner = CliRunner()
 
@@ -120,13 +122,71 @@ class TestRun:
         assert result.exit_code == 1
         assert "not found" in result.output
 
-    def test_run_without_dry_run_exits(self, tmp_path):
+    def test_run_with_server_url_executes(self, tmp_path):
+        """Run command with --server-url and mocked runner completes successfully."""
+        # Create prompts file
+        prompts_path = tmp_path / "prompts.jsonl"
+        prompts_path.write_text(
+            '{"messages": [{"role": "user", "content": "Hello"}]}\n'
+        )
+        results_dir = tmp_path / "results"
+
         config_path = tmp_path / "exp.yaml"
         config_path.write_text(
             yaml.dump(
                 {
                     "name": "test",
-                    "model": {"name": "Qwen/Qwen3-0.6B"},
+                    "model": {"name": "test-model"},
+                    "framework": "vllm",
+                    "infrastructure": {"gpu_type": "A100-80GB"},
+                    "workload": {
+                        "type": "single",
+                        "requests": {"source": str(prompts_path), "count": 2},
+                    },
+                    "metrics": {"output_dir": str(results_dir)},
+                }
+            )
+        )
+
+        mock_result = RequestResult(
+            request_index=0,
+            ttft_ms=50.0,
+            e2e_latency_ms=300.0,
+            inter_token_latencies_ms=[10.0, 12.0],
+            prompt_tokens=10,
+            completion_tokens=20,
+        )
+
+        with (
+            patch("llm_inf_bench.cli.VLLMRunner") as MockRunner,
+        ):
+            mock_runner_instance = AsyncMock()
+            MockRunner.return_value = mock_runner_instance
+            mock_runner_instance.wait_for_health = AsyncMock()
+            mock_runner_instance.chat_completion = AsyncMock(return_value=mock_result)
+            mock_runner_instance.close = AsyncMock()
+
+            result = runner.invoke(
+                app,
+                ["run", str(config_path), "--server-url", "http://localhost:8000", "--confirm"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert results_dir.exists()
+        json_files = list(results_dir.glob("*.json"))
+        assert len(json_files) == 1
+        data = json.loads(json_files[0].read_text())
+        assert data["status"] in ("completed", "partial")
+        assert len(data["requests"]) == 2
+
+    def test_run_cost_confirmation_abort(self, tmp_path):
+        """Run command prompts for cost confirmation and aborts when declined."""
+        config_path = tmp_path / "exp.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "name": "test",
+                    "model": {"name": "test-model"},
                     "framework": "vllm",
                     "infrastructure": {"gpu_type": "A100-80GB"},
                     "workload": {
@@ -136,6 +196,7 @@ class TestRun:
                 }
             )
         )
-        result = runner.invoke(app, ["run", str(config_path)])
-        assert result.exit_code == 1
-        assert "not yet implemented" in result.output
+        # Answer "n" to the confirmation prompt
+        result = runner.invoke(app, ["run", str(config_path)], input="n\n")
+        assert result.exit_code == 0
+        assert "Aborted" in result.output
