@@ -158,10 +158,10 @@ class TestRun:
         )
 
         with (
-            patch("llm_inf_bench.cli.VLLMRunner") as MockRunner,
+            patch("llm_inf_bench.cli.create_runner") as mock_create_runner,
         ):
             mock_runner_instance = AsyncMock()
-            MockRunner.return_value = mock_runner_instance
+            mock_create_runner.return_value = mock_runner_instance
             mock_runner_instance.wait_for_health = AsyncMock()
             mock_runner_instance.chat_completion = AsyncMock(return_value=mock_result)
             mock_runner_instance.close = AsyncMock()
@@ -200,3 +200,89 @@ class TestRun:
         result = runner.invoke(app, ["run", str(config_path)], input="n\n")
         assert result.exit_code == 0
         assert "Aborted" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Helpers for results commands
+# ---------------------------------------------------------------------------
+
+
+def _write_result(directory, run_id, *, framework="vllm", model="test-model", started_at="2025-01-01T00:00:00"):
+    """Write a minimal valid result JSON file."""
+    directory.mkdir(parents=True, exist_ok=True)
+    data = {
+        "run_id": run_id,
+        "status": "completed",
+        "experiment": {
+            "name": "test",
+            "framework": framework,
+            "model": {"name": model},
+            "infrastructure": {"gpu_type": "A100-80GB"},
+        },
+        "metadata": {"started_at": started_at},
+        "summary": {
+            "total_requests": 10,
+            "successful_requests": 10,
+            "failed_requests": 0,
+            "total_duration_s": 5.0,
+            "requests_per_second": 2.0,
+            "total_prompt_tokens": 200,
+            "total_completion_tokens": 500,
+            "tokens_per_second": 100.0,
+            "ttft": {"p50": 50.0, "p95": 90.0, "p99": 99.0, "mean": 55.0, "min": 10.0, "max": 120.0},
+            "e2e_latency": {"p50": 300.0, "p95": 400.0, "p99": 500.0, "mean": 310.0, "min": 100.0, "max": 600.0},
+            "tbt": {"p50": 12.0, "p95": 18.0, "p99": 24.0, "mean": 13.0, "min": 5.0, "max": 30.0},
+        },
+        "requests": [],
+    }
+    fp = directory / f"{run_id}.json"
+    fp.write_text(json.dumps(data))
+    return fp
+
+
+class TestResultsList:
+    def test_no_results(self, tmp_path):
+        result = runner.invoke(app, ["results", "list", "--dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "No results found" in result.output
+
+    def test_lists_results(self, tmp_path):
+        _write_result(tmp_path, "run-a")
+        _write_result(tmp_path, "run-b")
+        result = runner.invoke(app, ["results", "list", "--dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "run-a" in result.output
+        assert "run-b" in result.output
+
+
+class TestResultsShow:
+    def test_shows_result(self, tmp_path):
+        _write_result(tmp_path, "my-run")
+        result = runner.invoke(app, ["results", "show", "my-run", "--dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "my-run" in result.output
+        assert "vllm" in result.output
+
+    def test_missing_result(self, tmp_path):
+        tmp_path.mkdir(exist_ok=True)
+        result = runner.invoke(app, ["results", "show", "nope", "--dir", str(tmp_path)])
+        assert result.exit_code == 1
+
+
+class TestResultsCompare:
+    def test_compares_two_results(self, tmp_path):
+        _write_result(tmp_path, "run-a", framework="vllm")
+        _write_result(tmp_path, "run-b", framework="sglang")
+        result = runner.invoke(
+            app, ["results", "compare", "run-a", "run-b", "--dir", str(tmp_path)]
+        )
+        assert result.exit_code == 0
+        assert "run-a" in result.output
+        assert "run-b" in result.output
+
+    def test_missing_result(self, tmp_path):
+        _write_result(tmp_path, "run-a")
+        result = runner.invoke(
+            app, ["results", "compare", "run-a", "nope", "--dir", str(tmp_path)]
+        )
+        assert result.exit_code == 1

@@ -25,7 +25,7 @@ class RunPodProvider(Provider):
         self,
         api_key: str | None = None,
         poll_interval: int = 5,
-        ready_timeout: int = 600,
+        ready_timeout: int = 1200,
     ) -> None:
         resolved_key = self._resolve_api_key(api_key)
         runpod_sdk.api_key = resolved_key

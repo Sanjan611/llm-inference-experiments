@@ -20,13 +20,19 @@ from llm_inf_bench.config.schema import AppConfig, ExperimentConfig
 from llm_inf_bench.config.validation import ConfigValidationError
 from llm_inf_bench.metrics.aggregator import aggregate_results
 from llm_inf_bench.metrics.collector import RequestResult, RunMetadata
-from llm_inf_bench.metrics.storage import generate_run_id, save_results
+from llm_inf_bench.metrics.storage import (
+    generate_run_id,
+    list_results,
+    load_result,
+    reconstruct_aggregated_metrics,
+    save_results,
+)
 from llm_inf_bench.output.console import BenchmarkProgress
-from llm_inf_bench.output.summary import print_summary
+from llm_inf_bench.output.summary import print_comparison, print_summary
 from llm_inf_bench.providers.runpod.client import RunPodProvider
 from llm_inf_bench.providers.runpod.pricing import check_pricing_staleness, estimate_cost
+from llm_inf_bench.runners import Runner, create_runner
 from llm_inf_bench.runners.base import HealthCheckTimeout
-from llm_inf_bench.runners.vllm import VLLMRunner
 from llm_inf_bench.workloads.single import SingleWorkload, load_prompts
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,104 @@ app = typer.Typer(
 )
 
 console = Console()
+
+results_app = typer.Typer(help="Browse and compare experiment results.")
+app.add_typer(results_app, name="results")
+
+
+@results_app.command("list")
+def results_list(
+    output_dir: str = typer.Option("results/", "--dir", help="Results directory"),
+) -> None:
+    """List completed experiment runs."""
+    stored = list_results(output_dir)
+    if not stored:
+        console.print("No results found.")
+        return
+
+    table = Table(title="Experiment Results")
+    table.add_column("Run ID", style="bold")
+    table.add_column("Status")
+    table.add_column("Framework")
+    table.add_column("Model")
+    table.add_column("Requests")
+    table.add_column("Date")
+
+    for r in stored:
+        framework = r.experiment.get("framework", "?")
+        model_cfg = r.experiment.get("model", {})
+        model_name = model_cfg.get("name", "?") if isinstance(model_cfg, dict) else str(model_cfg)
+        total = r.summary.get("total_requests", "?")
+        success = r.summary.get("successful_requests", "?")
+        date = r.metadata.get("started_at", "")
+        if isinstance(date, str) and len(date) > 10:
+            date = date[:10]
+        table.add_row(r.run_id, r.status, framework, model_name, f"{success}/{total}", date)
+
+    console.print(table)
+
+
+@results_app.command("show")
+def results_show(
+    run_id: str = typer.Argument(help="Run ID (exact or partial match)"),
+    output_dir: str = typer.Option("results/", "--dir", help="Results directory"),
+) -> None:
+    """Show details for a single experiment run."""
+    try:
+        result = load_result(output_dir, run_id)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Config summary
+    framework = result.experiment.get("framework", "?")
+    model_cfg = result.experiment.get("model", {})
+    model_name = model_cfg.get("name", "?") if isinstance(model_cfg, dict) else str(model_cfg)
+    infra = result.experiment.get("infrastructure", {})
+    gpu = infra.get("gpu_type", "?") if isinstance(infra, dict) else "?"
+    workload_cfg = result.experiment.get("workload", {})
+    workload_type = workload_cfg.get("type", "?") if isinstance(workload_cfg, dict) else "?"
+
+    config_table = Table(title=f"Run: {result.run_id}")
+    config_table.add_column("Setting", style="bold")
+    config_table.add_column("Value")
+    config_table.add_row("Status", result.status)
+    config_table.add_row("Framework", framework)
+    config_table.add_row("Model", model_name)
+    config_table.add_row("GPU", gpu)
+    config_table.add_row("Workload", workload_type)
+    console.print(config_table)
+
+    # Metrics summary
+    try:
+        metrics = reconstruct_aggregated_metrics(result.summary)
+        print_summary(metrics)
+    except (KeyError, TypeError):
+        console.print("[yellow]Could not reconstruct metrics summary.[/yellow]")
+
+    # Metadata
+    console.print("\n[bold]Metadata[/bold]")
+    for key in ("server_url", "pod_id", "started_at", "finished_at"):
+        val = result.metadata.get(key)
+        if val:
+            console.print(f"  {key}: {val}")
+
+
+@results_app.command("compare")
+def results_compare(
+    id_a: str = typer.Argument(help="Run ID for run A"),
+    id_b: str = typer.Argument(help="Run ID for run B"),
+    output_dir: str = typer.Option("results/", "--dir", help="Results directory"),
+) -> None:
+    """Compare two experiment runs side by side."""
+    try:
+        result_a = load_result(output_dir, id_a)
+        result_b = load_result(output_dir, id_b)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    print_comparison(result_a, result_b)
 
 
 @app.command()
@@ -191,7 +295,7 @@ async def _execute_run(
     progress = BenchmarkProgress()
     provider: RunPodProvider | None = None
     pod_id: str | None = None
-    runner: VLLMRunner | None = None
+    runner: Runner | None = None
     results: list[RequestResult] = []
     run_started = datetime.now(timezone.utc)
 
@@ -212,11 +316,15 @@ async def _execute_run(
             progress.phase_provisioning_done(pod_id, base_url)
 
         # Phase 2: Health check
-        runner = VLLMRunner(base_url=base_url, model=experiment.model.name)
+        runner = create_runner(
+            framework=experiment.framework,
+            base_url=base_url,
+            model=experiment.model.name,
+        )
         progress.phase_model_loading(experiment.model.name)
         health_start = time.monotonic()
         try:
-            await runner.wait_for_health(timeout=600, interval=5)
+            await runner.wait_for_health()
         except HealthCheckTimeout as e:
             console.print(f"\n[red]Health check failed:[/red] {e}")
             raise typer.Exit(1)

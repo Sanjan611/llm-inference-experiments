@@ -1,7 +1,7 @@
-extends: "../base/vllm-defaults.yaml"
+extends: "../base/sglang-defaults.yaml"
 
-name: "quick-smoke-test-vllm"
-description: "Quick smoke test with Qwen3-0.6B on vLLM — matches POC 3 specs (small model, cheap GPU)"
+name: "quick-smoke-test-sglang"
+description: "Quick smoke test with Qwen3-0.6B on SGLang — matches POC 3 specs (small model, cheap GPU)"
 
 model:
   name: "Qwen/Qwen3-0.6B"

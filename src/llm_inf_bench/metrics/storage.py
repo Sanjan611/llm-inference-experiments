@@ -1,16 +1,20 @@
-"""JSON result storage."""
+"""JSON result storage and loading."""
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from llm_inf_bench.config.schema import ExperimentConfig
-from llm_inf_bench.metrics.aggregator import AggregatedMetrics
+from llm_inf_bench.metrics.aggregator import AggregatedMetrics, PercentileStats
 from llm_inf_bench.metrics.collector import RequestResult, RunMetadata
+
+logger = logging.getLogger(__name__)
 
 
 def generate_run_id(experiment_name: str, now: datetime | None = None) -> str:
@@ -64,3 +68,138 @@ def save_results(
         json.dump(payload, f, indent=2, default=_serialize)
 
     return file_path
+
+
+# ---------------------------------------------------------------------------
+# Result loading
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoredResult:
+    """Lightweight container for a loaded result file.
+
+    Uses raw dicts rather than Pydantic models so that results from older
+    (or newer) schema versions can still be loaded.
+    """
+
+    run_id: str
+    status: str
+    experiment: dict
+    metadata: dict
+    summary: dict
+    requests: list[dict] = field(default_factory=list)
+    file_path: Path = field(default_factory=lambda: Path())
+
+
+def list_results(output_dir: str | Path) -> list[StoredResult]:
+    """Load all result files from *output_dir*, newest first.
+
+    Malformed files are skipped with a logged warning.
+    """
+    out_path = Path(output_dir)
+    if not out_path.is_dir():
+        return []
+
+    results: list[StoredResult] = []
+    for fp in sorted(out_path.glob("*.json")):
+        try:
+            data = json.loads(fp.read_text())
+            results.append(
+                StoredResult(
+                    run_id=data["run_id"],
+                    status=data.get("status", "unknown"),
+                    experiment=data.get("experiment", {}),
+                    metadata=data.get("metadata", {}),
+                    summary=data.get("summary", {}),
+                    requests=data.get("requests", []),
+                    file_path=fp,
+                )
+            )
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed result file %s: %s", fp, exc)
+
+    # Sort newest first by started_at (fall back to file name)
+    def _sort_key(r: StoredResult) -> str:
+        return r.metadata.get("started_at", "") or ""
+
+    results.sort(key=_sort_key, reverse=True)
+    return results
+
+
+def load_result(output_dir: str | Path, run_id: str) -> StoredResult:
+    """Load a single result by run ID (exact or partial match).
+
+    Raises ``FileNotFoundError`` when no match is found, or ``ValueError``
+    when the *run_id* prefix matches multiple files.
+    """
+    out_path = Path(output_dir)
+
+    # Exact match first
+    exact = out_path / f"{run_id}.json"
+    if exact.is_file():
+        data = json.loads(exact.read_text())
+        return StoredResult(
+            run_id=data["run_id"],
+            status=data.get("status", "unknown"),
+            experiment=data.get("experiment", {}),
+            metadata=data.get("metadata", {}),
+            summary=data.get("summary", {}),
+            requests=data.get("requests", []),
+            file_path=exact,
+        )
+
+    # Partial / prefix match
+    matches = list(out_path.glob(f"*{run_id}*.json"))
+    if len(matches) == 0:
+        raise FileNotFoundError(
+            f"No result found for {run_id!r} in {out_path}"
+        )
+    if len(matches) > 1:
+        ids = [m.stem for m in matches]
+        raise ValueError(
+            f"Ambiguous run ID {run_id!r} — matches: {', '.join(ids)}"
+        )
+
+    fp = matches[0]
+    data = json.loads(fp.read_text())
+    return StoredResult(
+        run_id=data["run_id"],
+        status=data.get("status", "unknown"),
+        experiment=data.get("experiment", {}),
+        metadata=data.get("metadata", {}),
+        summary=data.get("summary", {}),
+        requests=data.get("requests", []),
+        file_path=fp,
+    )
+
+
+def _reconstruct_percentile_stats(d: dict | None) -> PercentileStats | None:
+    """Rebuild a ``PercentileStats`` from a stored dict."""
+    if d is None:
+        return None
+    return PercentileStats(
+        p50=d["p50"],
+        p95=d["p95"],
+        p99=d["p99"],
+        mean=d["mean"],
+        min=d["min"],
+        max=d["max"],
+    )
+
+
+def reconstruct_aggregated_metrics(summary: dict) -> AggregatedMetrics:
+    """Reconstruct ``AggregatedMetrics`` from the JSON summary dict."""
+    return AggregatedMetrics(
+        total_requests=summary["total_requests"],
+        successful_requests=summary["successful_requests"],
+        failed_requests=summary["failed_requests"],
+        total_duration_s=summary["total_duration_s"],
+        requests_per_second=summary["requests_per_second"],
+        total_prompt_tokens=summary["total_prompt_tokens"],
+        total_completion_tokens=summary["total_completion_tokens"],
+        tokens_per_second=summary["tokens_per_second"],
+        ttft=_reconstruct_percentile_stats(summary.get("ttft")),
+        e2e_latency=_reconstruct_percentile_stats(summary.get("e2e_latency")),
+        tbt=_reconstruct_percentile_stats(summary.get("tbt")),
+    )

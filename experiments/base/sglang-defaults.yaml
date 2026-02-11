@@ -1,0 +1,28 @@
+name: "sglang-base"
+description: "Base config for SGLang experiments — extend this in your own configs"
+
+model:
+  name: "Qwen/Qwen3-0.6B"
+
+framework: "sglang"
+framework_options:
+  gpu_memory_utilization: 0.9
+
+infrastructure:
+  provider: "runpod"
+  gpu_type: "A100-80GB"
+  gpu_count: 1
+
+workload:
+  type: "single"
+  requests:
+    source: "prompts/baseline.jsonl"
+    count: 100
+  parameters:
+    max_tokens: 256
+    temperature: 0.7
+
+metrics:
+  collect_gpu_metrics: true
+  sample_interval_ms: 100
+  output_dir: "results/"
