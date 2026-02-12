@@ -114,6 +114,108 @@ class TestWorkloadTypeValidation:
         assert validate_experiment(config) == []
 
 
+class TestSweepValidation:
+    def test_sweep_concurrency_valid(self):
+        config = _make_config(
+            workload={
+                "type": "concurrent",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "concurrency": 1,
+                "sweep": {"concurrency": [1, 2, 4]},
+            }
+        )
+        assert validate_experiment(config) == []
+
+    def test_sweep_concurrency_zero_fails(self):
+        config = _make_config(
+            workload={
+                "type": "concurrent",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "concurrency": 1,
+                "sweep": {"concurrency": [0, 2]},
+            }
+        )
+        errors = validate_experiment(config)
+        assert any("concurrency values must be >= 1" in e for e in errors)
+
+    def test_sweep_batch_size_valid(self):
+        config = _make_config(
+            workload={
+                "type": "batch",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "batch_size": 2,
+                "sweep": {"batch_size": [2, 4, 8]},
+            }
+        )
+        assert validate_experiment(config) == []
+
+    def test_sweep_batch_size_zero_fails(self):
+        config = _make_config(
+            workload={
+                "type": "batch",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "batch_size": 1,
+                "sweep": {"batch_size": [0]},
+            }
+        )
+        errors = validate_experiment(config)
+        assert any("batch_size values must be >= 1" in e for e in errors)
+
+    def test_sweep_concurrency_requires_compatible_type(self):
+        config = _make_config(
+            workload={
+                "type": "batch",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "batch_size": 2,
+                "sweep": {"concurrency": [1, 2]},
+            }
+        )
+        errors = validate_experiment(config)
+        assert any("'concurrent' or 'single'" in e for e in errors)
+
+    def test_sweep_batch_size_requires_compatible_type(self):
+        config = _make_config(
+            workload={
+                "type": "concurrent",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "concurrency": 4,
+                "sweep": {"batch_size": [2, 4]},
+            }
+        )
+        errors = validate_experiment(config)
+        assert any("'batch' or 'single'" in e for e in errors)
+
+    def test_sweep_concurrency_with_single_type_passes(self):
+        config = _make_config(
+            workload={
+                "type": "single",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "sweep": {"concurrency": [1, 2, 4]},
+            }
+        )
+        assert validate_experiment(config) == []
+
+    def test_sweep_batch_size_with_single_type_passes(self):
+        config = _make_config(
+            workload={
+                "type": "single",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "sweep": {"batch_size": [2, 4]},
+            }
+        )
+        assert validate_experiment(config) == []
+
+    def test_empty_sweep_passes(self):
+        config = _make_config(
+            workload={
+                "type": "single",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "sweep": {},
+            }
+        )
+        assert validate_experiment(config) == []
+
+
 class TestMultipleErrors:
     def test_collects_all_errors(self):
         config = _make_config(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeElapsedColumn
 
@@ -98,6 +100,27 @@ class BenchmarkProgress:
 
         live_stats = "  ".join(stats_parts)
         self._progress.update(self._task_id, advance=1, live_stats=live_stats)
+
+    # --- Sweep support ---
+
+    def phase_sweep_iteration(
+        self, iteration: int, total: int, params: dict[str, Any]
+    ) -> None:
+        """Print sweep progress header before each iteration."""
+        params_str = ", ".join(f"{k}={v}" for k, v in params.items())
+        console.print(
+            f"\n[bold cyan]── Sweep iteration {iteration}/{total} ──[/bold cyan]"
+            f"  {params_str}"
+        )
+
+    def reset_progress(self) -> None:
+        """Reset progress counters between sweep iterations."""
+        self._progress = None
+        self._task_id = None
+        self._completed = 0
+        self._total_tokens = 0
+        self._total_ttft = 0.0
+        self._ttft_count = 0
 
     # --- Phase 4: Cleanup ---
 

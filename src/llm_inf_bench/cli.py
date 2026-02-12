@@ -17,6 +17,7 @@ from rich.table import Table
 
 from llm_inf_bench.config.loader import APP_CONFIG_DIR, APP_CONFIG_PATH, load_experiment
 from llm_inf_bench.config.schema import AppConfig, ExperimentConfig
+from llm_inf_bench.config.sweep import expand_sweep
 from llm_inf_bench.config.validation import ConfigValidationError
 from llm_inf_bench.metrics.aggregator import aggregate_results
 from llm_inf_bench.metrics.collector import RequestResult, RunMetadata
@@ -34,7 +35,7 @@ from llm_inf_bench.providers.runpod.client import RunPodProvider
 from llm_inf_bench.providers.runpod.pricing import check_pricing_staleness, estimate_cost
 from llm_inf_bench.runners import Runner, create_runner
 from llm_inf_bench.runners.base import HealthCheckTimeout
-from llm_inf_bench.workloads.single import SingleWorkload, load_prompts
+from llm_inf_bench.workloads import create_workload, load_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +255,27 @@ def run(
     table.add_row("GPU", f"{experiment.infrastructure.gpu_type} x{experiment.infrastructure.gpu_count}")
     table.add_row("Workload", experiment.workload.type)
     table.add_row("Requests", str(experiment.workload.requests.count))
+    if experiment.workload.batch_size is not None:
+        table.add_row("Batch size", str(experiment.workload.batch_size))
+    if experiment.workload.concurrency is not None:
+        table.add_row("Concurrency", str(experiment.workload.concurrency))
+
+    # Show sweep info
+    sweep_variations = expand_sweep(experiment)
+    if len(sweep_variations) > 1:
+        sweep_desc = f"{len(sweep_variations)} iterations"
+        if experiment.workload.sweep:
+            parts: list[str] = []
+            if experiment.workload.sweep.concurrency:
+                parts.append(
+                    f"concurrency={experiment.workload.sweep.concurrency}"
+                )
+            if experiment.workload.sweep.batch_size:
+                parts.append(
+                    f"batch_size={experiment.workload.sweep.batch_size}"
+                )
+            sweep_desc += f" ({', '.join(parts)})"
+        table.add_row("Sweep", sweep_desc)
 
     cost = estimate_cost(experiment.infrastructure.gpu_type, experiment.infrastructure.gpu_count, 60)
     if cost is not None:
@@ -292,15 +314,11 @@ async def _execute_run(
     experiment: ExperimentConfig,
     server_url: str | None = None,
 ) -> None:
-    """Async orchestration: provision -> health -> execute -> aggregate -> save -> cleanup."""
+    """Async orchestration: provision -> health -> sweep loop -> cleanup."""
     progress = BenchmarkProgress()
     provider: RunPodProvider | None = None
     pod_id: str | None = None
     runner: Runner | None = None
-    scraper: GpuMetricsScraper | None = None
-    gpu_time_series: GpuTimeSeries | None = None
-    results: list[RequestResult] = []
-    run_started = datetime.now(timezone.utc)
 
     try:
         # Phase 1: Provisioning
@@ -333,7 +351,52 @@ async def _execute_run(
             raise typer.Exit(1)
         progress.phase_model_loading_done(time.monotonic() - health_start)
 
-        # Start GPU metrics scraper (after health check, before requests)
+        # Sweep loop
+        variations = expand_sweep(experiment)
+        for i, (variation, params) in enumerate(variations, 1):
+            if len(variations) > 1:
+                progress.phase_sweep_iteration(i, len(variations), params)
+                progress.reset_progress()
+
+            await _execute_iteration(
+                variation, runner, progress, base_url, pod_id, server_url,
+            )
+
+    finally:
+        # Cleanup
+        progress.phase_cleanup()
+        terminated_pod = False
+        if runner:
+            await runner.close()
+        if provider and pod_id:
+            try:
+                provider.terminate(pod_id)
+                terminated_pod = True
+            except Exception as e:
+                console.print(
+                    f"[red]Failed to terminate pod {pod_id}:[/red] {e}\n"
+                    f"[red]MANUAL ACTION REQUIRED: terminate via RunPod console.[/red]"
+                )
+        progress.phase_cleanup_done(terminated_pod)
+
+
+async def _execute_iteration(
+    experiment: ExperimentConfig,
+    runner: Runner,
+    progress: BenchmarkProgress,
+    base_url: str,
+    pod_id: str | None,
+    server_url: str | None,
+) -> None:
+    """Execute a single benchmark iteration (one sweep variation)."""
+    scraper: GpuMetricsScraper | None = None
+    gpu_time_series: GpuTimeSeries | None = None
+    results: list[RequestResult] = []
+    run_started = datetime.now(timezone.utc)
+    exec_start: float | None = None
+
+    try:
+        # Start GPU metrics scraper
         if experiment.metrics.collect_gpu_metrics and hasattr(runner, "http_client"):
             scraper = GpuMetricsScraper(
                 client=runner.http_client,
@@ -342,17 +405,20 @@ async def _execute_run(
             )
             scraper.start()
 
-        # Phase 3: Execution
+        # Execution
         prompts = load_prompts(
             experiment.workload.requests.source,
             experiment.workload.requests.count,
         )
-        workload = SingleWorkload(
+        workload = create_workload(
+            workload_type=experiment.workload.type,
             prompts=prompts,
             model=experiment.model.name,
             max_tokens=experiment.workload.parameters.max_tokens,
             temperature=experiment.workload.parameters.temperature,
             on_request_complete=progress.on_request_complete,
+            batch_size=experiment.workload.batch_size,
+            concurrency=experiment.workload.concurrency,
         )
 
         rich_progress = progress.phase_execution_start(
@@ -367,7 +433,7 @@ async def _execute_run(
         if scraper is not None:
             gpu_time_series = await scraper.stop()
 
-        # Phase 4: Aggregate, save, summarize
+        # Aggregate, save, summarize
         aggregated = aggregate_results(results, total_duration_s=exec_duration)
         if gpu_time_series is not None:
             aggregated.gpu_summary = GpuMetricsScraper.summarize(gpu_time_series)
@@ -401,7 +467,7 @@ async def _execute_run(
 
         # Save partial results
         if results:
-            exec_duration = time.monotonic() - exec_start if 'exec_start' in dir() else 0
+            exec_duration = time.monotonic() - exec_start if exec_start is not None else 0
             aggregated = aggregate_results(results, total_duration_s=exec_duration)
             if gpu_time_series is not None:
                 aggregated.gpu_summary = GpuMetricsScraper.summarize(gpu_time_series)
@@ -422,23 +488,6 @@ async def _execute_run(
             )
             console.print(f"\n[yellow]Partial results saved:[/yellow] {result_path}")
         raise
-
-    finally:
-        # Cleanup
-        progress.phase_cleanup()
-        terminated_pod = False
-        if runner:
-            await runner.close()
-        if provider and pod_id:
-            try:
-                provider.terminate(pod_id)
-                terminated_pod = True
-            except Exception as e:
-                console.print(
-                    f"[red]Failed to terminate pod {pod_id}:[/red] {e}\n"
-                    f"[red]MANUAL ACTION REQUIRED: terminate via RunPod console.[/red]"
-                )
-        progress.phase_cleanup_done(terminated_pod)
 
 
 if __name__ == "__main__":

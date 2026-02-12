@@ -51,4 +51,30 @@ def validate_experiment(config: ExperimentConfig) -> list[str]:
     if wl.type == "multi_turn" and wl.conversation is None:
         errors.append("Workload type 'multi_turn' requires 'conversation' to be set")
 
+    # 5. Sweep validation
+    if wl.sweep is not None:
+        if wl.sweep.concurrency is not None:
+            for v in wl.sweep.concurrency:
+                if v < 1:
+                    errors.append(
+                        f"Sweep concurrency values must be >= 1, got {v}"
+                    )
+            if wl.type not in ("concurrent", "single"):
+                errors.append(
+                    "Sweep over concurrency requires workload type "
+                    "'concurrent' or 'single'"
+                )
+
+        if wl.sweep.batch_size is not None:
+            for v in wl.sweep.batch_size:
+                if v < 1:
+                    errors.append(
+                        f"Sweep batch_size values must be >= 1, got {v}"
+                    )
+            if wl.type not in ("batch", "single"):
+                errors.append(
+                    "Sweep over batch_size requires workload type "
+                    "'batch' or 'single'"
+                )
+
     return errors

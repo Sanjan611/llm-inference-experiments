@@ -1,0 +1,23 @@
+extends: "../base/vllm-defaults.yaml"
+
+name: "concurrency-sweep-vllm"
+description: "Sweep over concurrency levels on vLLM — measures throughput scaling under load"
+
+model:
+  name: "Qwen/Qwen3-0.6B"
+
+infrastructure:
+  gpu_type: "RTX 4000 Ada"
+  gpu_count: 1
+
+workload:
+  type: "concurrent"
+  concurrency: 1
+  requests:
+    source: "../../prompts/baseline.jsonl"
+    count: 32
+  parameters:
+    max_tokens: 128
+    temperature: 0.7
+  sweep:
+    concurrency: [1, 2, 4, 8, 16]
