@@ -259,3 +259,171 @@ class TestReconstructAggregatedMetrics:
         assert metrics.ttft is None
         assert metrics.e2e_latency is None
         assert metrics.tbt is None
+
+    def test_gpu_summary_none_when_absent(self):
+        summary = {
+            "total_requests": 1,
+            "successful_requests": 1,
+            "failed_requests": 0,
+            "total_duration_s": 1.0,
+            "requests_per_second": 1.0,
+            "total_prompt_tokens": 10,
+            "total_completion_tokens": 20,
+            "tokens_per_second": 20.0,
+            "ttft": None,
+            "e2e_latency": None,
+            "tbt": None,
+        }
+        metrics = reconstruct_aggregated_metrics(summary)
+        assert metrics.gpu_summary is None
+
+    def test_gpu_summary_reconstructed(self):
+        summary = {
+            "total_requests": 1,
+            "successful_requests": 1,
+            "failed_requests": 0,
+            "total_duration_s": 1.0,
+            "requests_per_second": 1.0,
+            "total_prompt_tokens": 10,
+            "total_completion_tokens": 20,
+            "tokens_per_second": 20.0,
+            "ttft": None,
+            "e2e_latency": None,
+            "tbt": None,
+            "gpu_summary": {
+                "kv_cache_usage_peak": 0.5,
+                "kv_cache_usage_mean": 0.3,
+                "active_requests_peak": 2.0,
+                "active_requests_mean": 1.5,
+                "prefix_cache_hit_rate": 0.67,
+                "generation_throughput": 150.0,
+                "total_samples": 42,
+                "scrape_errors": 1,
+            },
+        }
+        metrics = reconstruct_aggregated_metrics(summary)
+        gs = metrics.gpu_summary
+        assert gs is not None
+        assert gs.kv_cache_usage_peak == 0.5
+        assert gs.kv_cache_usage_mean == 0.3
+        assert gs.active_requests_peak == 2.0
+        assert gs.prefix_cache_hit_rate == 0.67
+        assert gs.generation_throughput == 150.0
+        assert gs.total_samples == 42
+        assert gs.scrape_errors == 1
+
+
+class TestGpuDataSaveLoad:
+    """Save/load results with GPU time-series data."""
+
+    def _make_config(self) -> ExperimentConfig:
+        return ExperimentConfig(
+            name="gpu-test",
+            model={"name": "test-model"},
+            framework="vllm",
+            infrastructure={"gpu_type": "A100-80GB"},
+            workload={
+                "type": "single",
+                "requests": {"source": "prompts/test.jsonl", "count": 5},
+            },
+        )
+
+    def test_save_with_gpu_data(self, tmp_path):
+        from llm_inf_bench.metrics.gpu import GpuSample, GpuSummary, GpuTimeSeries
+
+        config = self._make_config()
+        req_results = [RequestResult(request_index=0, ttft_ms=50.0, e2e_latency_ms=300.0)]
+        aggregated = aggregate_results(req_results, total_duration_s=1.0)
+        aggregated.gpu_summary = GpuSummary(
+            kv_cache_usage_peak=0.5, kv_cache_usage_mean=0.3, total_samples=2,
+        )
+        metadata = RunMetadata(run_id="gpu-run", experiment_name="gpu-test", status="completed")
+        gpu_ts = GpuTimeSeries(
+            framework="vllm",
+            sample_interval_ms=100,
+            samples=[
+                GpuSample(timestamp=0.0, kv_cache_usage=0.3),
+                GpuSample(timestamp=0.1, kv_cache_usage=0.5),
+            ],
+            total_scrapes=2,
+            scrape_errors=0,
+        )
+
+        path = save_results(tmp_path, metadata, config, req_results, aggregated, gpu_time_series=gpu_ts)
+        data = json.loads(path.read_text())
+
+        assert "gpu_metrics" in data
+        gm = data["gpu_metrics"]
+        assert gm["framework"] == "vllm"
+        assert gm["sample_interval_ms"] == 100
+        assert gm["total_scrapes"] == 2
+        assert gm["scrape_errors"] == 0
+        assert len(gm["time_series"]) == 2
+        assert gm["time_series"][0]["kv_cache_usage"] == 0.3
+
+    def test_save_without_gpu_data(self, tmp_path):
+        config = self._make_config()
+        req_results = [RequestResult(request_index=0)]
+        aggregated = aggregate_results(req_results, total_duration_s=1.0)
+        metadata = RunMetadata(run_id="no-gpu", experiment_name="gpu-test", status="completed")
+
+        path = save_results(tmp_path, metadata, config, req_results, aggregated)
+        data = json.loads(path.read_text())
+        assert "gpu_metrics" not in data
+
+    def test_load_result_with_gpu_metrics(self, tmp_path):
+        # Write a result file with gpu_metrics
+        data = {
+            "run_id": "gpu-load-test",
+            "status": "completed",
+            "experiment": {"name": "t", "framework": "vllm", "model": {"name": "m"}},
+            "metadata": {"started_at": "2025-01-01T00:00:00"},
+            "summary": {
+                "total_requests": 1, "successful_requests": 1, "failed_requests": 0,
+                "total_duration_s": 1.0, "requests_per_second": 1.0,
+                "total_prompt_tokens": 10, "total_completion_tokens": 20,
+                "tokens_per_second": 20.0, "ttft": None, "e2e_latency": None, "tbt": None,
+            },
+            "requests": [],
+            "gpu_metrics": {
+                "framework": "vllm",
+                "sample_interval_ms": 100,
+                "total_scrapes": 5,
+                "scrape_errors": 0,
+                "time_series": [{"timestamp": 0.0, "kv_cache_usage": 0.2}],
+            },
+        }
+        fp = tmp_path / "gpu-load-test.json"
+        fp.write_text(json.dumps(data))
+
+        result = load_result(tmp_path, "gpu-load-test")
+        assert result.gpu_metrics is not None
+        assert result.gpu_metrics["framework"] == "vllm"
+        assert len(result.gpu_metrics["time_series"]) == 1
+
+    def test_load_result_without_gpu_metrics(self, tmp_path):
+        _write_result_file(tmp_path, "no-gpu-run")
+        result = load_result(tmp_path, "no-gpu-run")
+        assert result.gpu_metrics is None
+
+    def test_list_results_preserves_gpu_metrics(self, tmp_path):
+        data = {
+            "run_id": "list-gpu-test",
+            "status": "completed",
+            "experiment": {"name": "t", "framework": "vllm", "model": {"name": "m"}},
+            "metadata": {"started_at": "2025-01-01T00:00:00"},
+            "summary": {
+                "total_requests": 1, "successful_requests": 1, "failed_requests": 0,
+                "total_duration_s": 1.0, "requests_per_second": 1.0,
+                "total_prompt_tokens": 10, "total_completion_tokens": 20,
+                "tokens_per_second": 20.0, "ttft": None, "e2e_latency": None, "tbt": None,
+            },
+            "requests": [],
+            "gpu_metrics": {"framework": "sglang", "sample_interval_ms": 200,
+                            "total_scrapes": 3, "scrape_errors": 1, "time_series": []},
+        }
+        (tmp_path / "list-gpu-test.json").write_text(json.dumps(data))
+        results = list_results(tmp_path)
+        assert len(results) == 1
+        assert results[0].gpu_metrics is not None
+        assert results[0].gpu_metrics["framework"] == "sglang"

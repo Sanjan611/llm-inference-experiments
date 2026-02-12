@@ -11,6 +11,7 @@ from rich.table import Table
 from llm_inf_bench.metrics.aggregator import AggregatedMetrics, PercentileStats
 
 if TYPE_CHECKING:
+    from llm_inf_bench.metrics.gpu import GpuSummary
     from llm_inf_bench.metrics.storage import StoredResult
 
 console = Console()
@@ -36,6 +37,27 @@ def print_summary(metrics: AggregatedMetrics) -> None:
         f"  Latency:      {_fmt_percentiles(metrics.e2e_latency)}",
         f"  TBT:          {_fmt_percentiles(metrics.tbt)}",
     ]
+
+    # Server Metrics section (when GPU data is available)
+    gs = metrics.gpu_summary
+    if gs is not None and gs.total_samples > 0:
+        lines.append("")
+        lines.append("  Server Metrics")
+        if gs.kv_cache_usage_peak is not None and gs.kv_cache_usage_mean is not None:
+            lines.append(
+                f"  KV Cache:     peak={gs.kv_cache_usage_peak * 100:.1f}%"
+                f"  mean={gs.kv_cache_usage_mean * 100:.1f}%"
+            )
+        if gs.prefix_cache_hit_rate is not None:
+            lines.append(f"  Cache Hits:   {gs.prefix_cache_hit_rate * 100:.1f}%")
+        if gs.generation_throughput is not None:
+            lines.append(f"  Gen Tput:     {gs.generation_throughput:.1f} tok/s (server-side)")
+        if gs.active_requests_peak is not None and gs.active_requests_mean is not None:
+            lines.append(
+                f"  Active Reqs:  peak={gs.active_requests_peak:.0f}"
+                f"  mean={gs.active_requests_mean:.1f}"
+            )
+        lines.append(f"  Samples:      {gs.total_samples} ({gs.scrape_errors} errors)")
 
     panel = Panel(
         "\n".join(lines),
@@ -167,5 +189,61 @@ def print_comparison(result_a: StoredResult, result_b: StoredResult) -> None:
     # TBT
     for row in _percentile_rows("TBT", ma.tbt, mb.tbt):
         table.add_row(*row)
+
+    # GPU / Server Metrics (only if at least one run has data)
+    ga = ma.gpu_summary
+    gb = mb.gpu_summary
+    if ga is not None or gb is not None:
+        table.add_section()
+
+        def _gpu_val(gs: "GpuSummary | None", attr: str) -> float | None:
+            if gs is None:
+                return None
+            return getattr(gs, attr, None)
+
+        # KV Cache (peak) — displayed as percentage
+        kv_a = _gpu_val(ga, "kv_cache_usage_peak")
+        kv_b = _gpu_val(gb, "kv_cache_usage_peak")
+        kv_a_pct = kv_a * 100 if kv_a is not None else None
+        kv_b_pct = kv_b * 100 if kv_b is not None else None
+        delta = _fmt_delta(kv_a_pct, kv_b_pct) if kv_a_pct is not None and kv_b_pct is not None else ""
+        table.add_row(
+            "KV Cache (peak)",
+            _safe_fmt(kv_a_pct, "%"),
+            _safe_fmt(kv_b_pct, "%"),
+            delta,
+        )
+
+        # Cache Hit Rate
+        hr_a = _gpu_val(ga, "prefix_cache_hit_rate")
+        hr_b = _gpu_val(gb, "prefix_cache_hit_rate")
+        hr_a_pct = hr_a * 100 if hr_a is not None else None
+        hr_b_pct = hr_b * 100 if hr_b is not None else None
+        delta = (
+            _fmt_delta(hr_a_pct, hr_b_pct, lower_is_better=False)
+            if hr_a_pct is not None and hr_b_pct is not None
+            else ""
+        )
+        table.add_row(
+            "Cache Hit Rate",
+            _safe_fmt(hr_a_pct, "%"),
+            _safe_fmt(hr_b_pct, "%"),
+            delta,
+        )
+
+        # Gen Throughput (server)
+        gt_a = _gpu_val(ga, "generation_throughput")
+        gt_b = _gpu_val(gb, "generation_throughput")
+        delta = (
+            _fmt_delta(gt_a, gt_b, lower_is_better=False)
+            if gt_a is not None and gt_b is not None
+            else ""
+        )
+        table.add_row(
+            "Gen Tput (server)",
+            _safe_fmt(gt_a, " tok/s"),
+            _safe_fmt(gt_b, " tok/s"),
+            delta,
+        )
 
     console.print(table)

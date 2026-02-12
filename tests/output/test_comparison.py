@@ -22,8 +22,24 @@ def _make_stored(
     ttft: dict | None = None,
     e2e_latency: dict | None = None,
     tbt: dict | None = None,
+    gpu_summary: dict | None = None,
 ) -> StoredResult:
     default_stats = {"p50": 50.0, "p95": 90.0, "p99": 99.0, "mean": 55.0, "min": 10.0, "max": 120.0}
+    summary = {
+        "total_requests": total_requests,
+        "successful_requests": successful_requests,
+        "failed_requests": failed_requests,
+        "total_duration_s": total_duration_s,
+        "requests_per_second": requests_per_second,
+        "total_prompt_tokens": 200,
+        "total_completion_tokens": 500,
+        "tokens_per_second": tokens_per_second,
+        "ttft": ttft or default_stats,
+        "e2e_latency": e2e_latency or default_stats,
+        "tbt": tbt or default_stats,
+    }
+    if gpu_summary is not None:
+        summary["gpu_summary"] = gpu_summary
     return StoredResult(
         run_id=run_id,
         status="completed",
@@ -33,19 +49,7 @@ def _make_stored(
             "infrastructure": {"gpu_type": gpu},
         },
         metadata={"started_at": "2025-01-01T00:00:00"},
-        summary={
-            "total_requests": total_requests,
-            "successful_requests": successful_requests,
-            "failed_requests": failed_requests,
-            "total_duration_s": total_duration_s,
-            "requests_per_second": requests_per_second,
-            "total_prompt_tokens": 200,
-            "total_completion_tokens": 500,
-            "tokens_per_second": tokens_per_second,
-            "ttft": ttft or default_stats,
-            "e2e_latency": e2e_latency or default_stats,
-            "tbt": tbt or default_stats,
-        },
+        summary=summary,
         requests=[],
         file_path=Path("/tmp/fake.json"),
     )
@@ -92,4 +96,40 @@ class TestPrintComparison:
         a = _make_stored(run_id="run-a")
         b = _make_stored(run_id="run-b", ttft=None)
         # Should not raise
+        print_comparison(a, b)
+
+    def test_with_gpu_summary_both(self):
+        gpu_a = {
+            "kv_cache_usage_peak": 0.3, "kv_cache_usage_mean": 0.2,
+            "active_requests_peak": 1, "active_requests_mean": 1.0,
+            "prefix_cache_hit_rate": 0.5, "generation_throughput": 100.0,
+            "total_samples": 10, "scrape_errors": 0,
+        }
+        gpu_b = {
+            "kv_cache_usage_peak": 0.5, "kv_cache_usage_mean": 0.4,
+            "active_requests_peak": 2, "active_requests_mean": 1.5,
+            "prefix_cache_hit_rate": 0.7, "generation_throughput": 150.0,
+            "total_samples": 10, "scrape_errors": 0,
+        }
+        a = _make_stored(run_id="run-a", gpu_summary=gpu_a)
+        b = _make_stored(run_id="run-b", gpu_summary=gpu_b)
+        # Should not raise
+        print_comparison(a, b)
+
+    def test_with_gpu_summary_one_side_only(self):
+        gpu_a = {
+            "kv_cache_usage_peak": 0.3, "kv_cache_usage_mean": 0.2,
+            "active_requests_peak": 1, "active_requests_mean": 1.0,
+            "prefix_cache_hit_rate": 0.5, "generation_throughput": 100.0,
+            "total_samples": 10, "scrape_errors": 0,
+        }
+        a = _make_stored(run_id="run-a", gpu_summary=gpu_a)
+        b = _make_stored(run_id="run-b")  # No GPU data
+        # Should not raise
+        print_comparison(a, b)
+
+    def test_without_gpu_summary(self):
+        a = _make_stored(run_id="run-a")
+        b = _make_stored(run_id="run-b")
+        # Should not raise — no GPU section rendered
         print_comparison(a, b)

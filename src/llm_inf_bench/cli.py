@@ -20,6 +20,7 @@ from llm_inf_bench.config.schema import AppConfig, ExperimentConfig
 from llm_inf_bench.config.validation import ConfigValidationError
 from llm_inf_bench.metrics.aggregator import aggregate_results
 from llm_inf_bench.metrics.collector import RequestResult, RunMetadata
+from llm_inf_bench.metrics.gpu import GpuMetricsScraper, GpuTimeSeries
 from llm_inf_bench.metrics.storage import (
     generate_run_id,
     list_results,
@@ -296,6 +297,8 @@ async def _execute_run(
     provider: RunPodProvider | None = None
     pod_id: str | None = None
     runner: Runner | None = None
+    scraper: GpuMetricsScraper | None = None
+    gpu_time_series: GpuTimeSeries | None = None
     results: list[RequestResult] = []
     run_started = datetime.now(timezone.utc)
 
@@ -330,6 +333,15 @@ async def _execute_run(
             raise typer.Exit(1)
         progress.phase_model_loading_done(time.monotonic() - health_start)
 
+        # Start GPU metrics scraper (after health check, before requests)
+        if experiment.metrics.collect_gpu_metrics and hasattr(runner, "http_client"):
+            scraper = GpuMetricsScraper(
+                client=runner.http_client,
+                framework=experiment.framework,
+                sample_interval_ms=experiment.metrics.sample_interval_ms,
+            )
+            scraper.start()
+
         # Phase 3: Execution
         prompts = load_prompts(
             experiment.workload.requests.source,
@@ -351,8 +363,15 @@ async def _execute_run(
             results = await workload.execute(runner)
         exec_duration = time.monotonic() - exec_start
 
+        # Stop GPU metrics scraper
+        if scraper is not None:
+            gpu_time_series = await scraper.stop()
+
         # Phase 4: Aggregate, save, summarize
         aggregated = aggregate_results(results, total_duration_s=exec_duration)
+        if gpu_time_series is not None:
+            aggregated.gpu_summary = GpuMetricsScraper.summarize(gpu_time_series)
+
         run_id = generate_run_id(experiment.name)
         metadata = RunMetadata(
             run_id=run_id,
@@ -365,15 +384,27 @@ async def _execute_run(
         )
 
         output_dir = experiment.metrics.output_dir
-        result_path = save_results(output_dir, metadata, experiment, results, aggregated)
+        result_path = save_results(
+            output_dir, metadata, experiment, results, aggregated,
+            gpu_time_series=gpu_time_series,
+        )
         console.print(f"\n[green]Results saved:[/green] {result_path}")
         print_summary(aggregated)
 
     except KeyboardInterrupt:
+        # Stop scraper (best-effort)
+        if scraper is not None and gpu_time_series is None:
+            try:
+                gpu_time_series = await scraper.stop()
+            except Exception:
+                logger.warning("Failed to stop GPU scraper during interrupt", exc_info=True)
+
         # Save partial results
         if results:
             exec_duration = time.monotonic() - exec_start if 'exec_start' in dir() else 0
             aggregated = aggregate_results(results, total_duration_s=exec_duration)
+            if gpu_time_series is not None:
+                aggregated.gpu_summary = GpuMetricsScraper.summarize(gpu_time_series)
             run_id = generate_run_id(experiment.name)
             metadata = RunMetadata(
                 run_id=run_id,
@@ -385,7 +416,10 @@ async def _execute_run(
                 status="partial",
             )
             output_dir = experiment.metrics.output_dir
-            result_path = save_results(output_dir, metadata, experiment, results, aggregated)
+            result_path = save_results(
+                output_dir, metadata, experiment, results, aggregated,
+                gpu_time_series=gpu_time_series,
+            )
             console.print(f"\n[yellow]Partial results saved:[/yellow] {result_path}")
         raise
 

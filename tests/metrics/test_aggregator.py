@@ -152,3 +152,20 @@ class TestAggregateResults:
         agg = aggregate_results(results, total_duration_s=0.0)
         assert agg.tokens_per_second == 0.0
         assert agg.requests_per_second == 0.0
+
+    def test_gpu_summary_defaults_to_none(self):
+        agg = aggregate_results([], total_duration_s=0.0)
+        assert agg.gpu_summary is None
+
+    def test_gpu_summary_can_be_set(self):
+        from llm_inf_bench.metrics.gpu import GpuSummary
+
+        agg = aggregate_results([], total_duration_s=0.0)
+        gs = GpuSummary(
+            kv_cache_usage_peak=0.5,
+            kv_cache_usage_mean=0.3,
+            total_samples=10,
+        )
+        agg.gpu_summary = gs
+        assert agg.gpu_summary is gs
+        assert agg.gpu_summary.kv_cache_usage_peak == 0.5

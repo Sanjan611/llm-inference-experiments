@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from llm_inf_bench.metrics.collector import RequestResult
+
+if TYPE_CHECKING:
+    from llm_inf_bench.metrics.gpu import GpuSummary
 
 
 @dataclass
@@ -34,6 +38,7 @@ class AggregatedMetrics:
     ttft: PercentileStats | None
     e2e_latency: PercentileStats | None
     tbt: PercentileStats | None
+    gpu_summary: GpuSummary | None = None
 
 
 def compute_percentiles(values: list[float]) -> PercentileStats | None:

@@ -45,6 +45,16 @@ class OpenAICompatibleRunner(Runner):
     def model(self) -> str:
         return self._model
 
+    @property
+    def http_client(self) -> httpx.AsyncClient:
+        """Expose the HTTP client for the GPU metrics scraper."""
+        return self._client
+
+    @property
+    def base_url(self) -> str:
+        """Expose the base URL for external consumers."""
+        return self._base_url
+
     async def wait_for_health(
         self,
         timeout: float | None = None,

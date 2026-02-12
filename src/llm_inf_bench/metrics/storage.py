@@ -13,6 +13,7 @@ from typing import Any
 from llm_inf_bench.config.schema import ExperimentConfig
 from llm_inf_bench.metrics.aggregator import AggregatedMetrics, PercentileStats
 from llm_inf_bench.metrics.collector import RequestResult, RunMetadata
+from llm_inf_bench.metrics.gpu import GpuSummary, GpuTimeSeries
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +40,20 @@ def save_results(
     config: ExperimentConfig,
     results: list[RequestResult],
     aggregated: AggregatedMetrics,
+    gpu_time_series: GpuTimeSeries | None = None,
 ) -> Path:
     """Write results JSON to ``output_dir/{run_id}.json``.
 
     Creates the output directory if it doesn't exist. Returns the file path.
+    When *gpu_time_series* is provided, a ``gpu_metrics`` key is added to the
+    payload containing the full time-series data.
     """
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
     file_path = out_path / f"{metadata.run_id}.json"
 
-    payload = {
+    payload: dict[str, Any] = {
         "run_id": metadata.run_id,
         "status": metadata.status,
         "experiment": config.model_dump(mode="json"),
@@ -63,6 +67,15 @@ def save_results(
         "summary": dataclasses.asdict(aggregated),
         "requests": [dataclasses.asdict(r) for r in results],
     }
+
+    if gpu_time_series is not None:
+        payload["gpu_metrics"] = {
+            "framework": gpu_time_series.framework,
+            "sample_interval_ms": gpu_time_series.sample_interval_ms,
+            "total_scrapes": gpu_time_series.total_scrapes,
+            "scrape_errors": gpu_time_series.scrape_errors,
+            "time_series": [dataclasses.asdict(s) for s in gpu_time_series.samples],
+        }
 
     with open(file_path, "w") as f:
         json.dump(payload, f, indent=2, default=_serialize)
@@ -89,6 +102,7 @@ class StoredResult:
     metadata: dict
     summary: dict
     requests: list[dict] = field(default_factory=list)
+    gpu_metrics: dict | None = None
     file_path: Path = field(default_factory=lambda: Path())
 
 
@@ -113,6 +127,7 @@ def list_results(output_dir: str | Path) -> list[StoredResult]:
                     metadata=data.get("metadata", {}),
                     summary=data.get("summary", {}),
                     requests=data.get("requests", []),
+                    gpu_metrics=data.get("gpu_metrics"),
                     file_path=fp,
                 )
             )
@@ -146,6 +161,7 @@ def load_result(output_dir: str | Path, run_id: str) -> StoredResult:
             metadata=data.get("metadata", {}),
             summary=data.get("summary", {}),
             requests=data.get("requests", []),
+            gpu_metrics=data.get("gpu_metrics"),
             file_path=exact,
         )
 
@@ -170,6 +186,7 @@ def load_result(output_dir: str | Path, run_id: str) -> StoredResult:
         metadata=data.get("metadata", {}),
         summary=data.get("summary", {}),
         requests=data.get("requests", []),
+        gpu_metrics=data.get("gpu_metrics"),
         file_path=fp,
     )
 
@@ -188,6 +205,22 @@ def _reconstruct_percentile_stats(d: dict | None) -> PercentileStats | None:
     )
 
 
+def _reconstruct_gpu_summary(d: dict | None) -> GpuSummary | None:
+    """Rebuild a ``GpuSummary`` from a stored dict."""
+    if d is None:
+        return None
+    return GpuSummary(
+        kv_cache_usage_peak=d.get("kv_cache_usage_peak"),
+        kv_cache_usage_mean=d.get("kv_cache_usage_mean"),
+        active_requests_peak=d.get("active_requests_peak"),
+        active_requests_mean=d.get("active_requests_mean"),
+        prefix_cache_hit_rate=d.get("prefix_cache_hit_rate"),
+        generation_throughput=d.get("generation_throughput"),
+        total_samples=d.get("total_samples", 0),
+        scrape_errors=d.get("scrape_errors", 0),
+    )
+
+
 def reconstruct_aggregated_metrics(summary: dict) -> AggregatedMetrics:
     """Reconstruct ``AggregatedMetrics`` from the JSON summary dict."""
     return AggregatedMetrics(
@@ -202,4 +235,5 @@ def reconstruct_aggregated_metrics(summary: dict) -> AggregatedMetrics:
         ttft=_reconstruct_percentile_stats(summary.get("ttft")),
         e2e_latency=_reconstruct_percentile_stats(summary.get("e2e_latency")),
         tbt=_reconstruct_percentile_stats(summary.get("tbt")),
+        gpu_summary=_reconstruct_gpu_summary(summary.get("gpu_summary")),
     )
