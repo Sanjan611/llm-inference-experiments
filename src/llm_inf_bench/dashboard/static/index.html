@@ -168,6 +168,123 @@
   .status-badge.idle { background: rgba(139,143,163,0.15); color: var(--text-dim); }
   .status-badge.done { background: rgba(116,185,255,0.15); color: var(--blue); }
 
+  /* Pipeline stepper */
+  .pipeline-stepper {
+    display: flex;
+    align-items: flex-start;
+    padding: 16px 20px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    gap: 0;
+  }
+  .pipeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .pipeline-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: calc(50% + 18px);
+    width: calc(100% - 36px);
+    height: 2px;
+    background: var(--border);
+    transition: background 0.3s;
+  }
+  .pipeline-step.step-completed:not(:last-child)::after {
+    background: var(--green);
+  }
+  .step-indicator {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: var(--bg);
+    position: relative;
+    z-index: 1;
+    transition: border-color 0.3s, background 0.3s, color 0.3s;
+  }
+  .step-active .step-indicator {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(108, 92, 231, 0.1);
+    animation: stepPulse 2s ease-in-out infinite;
+  }
+  .step-completed .step-indicator {
+    border-color: var(--green);
+    background: var(--green);
+    color: white;
+  }
+  .step-skipped .step-indicator {
+    border-color: var(--text-dim);
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+  @keyframes stepPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(108, 92, 231, 0); }
+  }
+  .step-label {
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .step-active .step-label { color: var(--text); }
+  .step-completed .step-label { color: var(--green); }
+  .step-detail {
+    margin-top: 2px;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.7;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  /* Sidebar toggle */
+  .sidebar-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 12px;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .sidebar-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+
+  /* Sidebar collapse */
+  .layout { transition: grid-template-columns 0.3s ease; }
+  .sidebar {
+    transition: padding 0.3s ease, opacity 0.3s ease, border-color 0.3s ease;
+    overflow: hidden;
+  }
+  .sidebar.collapsed {
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
+    border-right-color: transparent;
+  }
+
   /* Charts grid */
   .charts-grid {
     display: grid;
@@ -295,10 +412,17 @@
 </head>
 <body>
 
-<div class="layout" x-data="dashboard()">
+<div class="layout" x-data="dashboard()" :style="{ 'grid-template-columns': sidebarOpen ? '280px 1fr' : '0px 1fr' }">
   <!-- Header -->
   <div class="header">
-    <h1><span>llm-inf-bench</span> Dashboard</h1>
+    <div style="display:flex;align-items:center;">
+      <button class="sidebar-toggle" @click="toggleSidebar()" :title="sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/>
+        </svg>
+      </button>
+      <h1><span>llm-inf-bench</span> Dashboard</h1>
+    </div>
     <div class="conn-status">
       <div class="conn-dot" :class="{ connected: wsConnected }"></div>
       <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
@@ -306,7 +430,7 @@
   </div>
 
   <!-- Sidebar -->
-  <div class="sidebar">
+  <div class="sidebar" :class="{ collapsed: !sidebarOpen }">
     <div>
       <h3>New Experiment</h3>
       <label>Config</label>
@@ -360,20 +484,42 @@
 
     <!-- LIVE TAB -->
     <div x-show="tab === 'live'" x-cloak>
-      <!-- Status banner -->
-      <div class="status-banner">
-        <template x-if="isRunning">
-          <span class="status-badge running" x-text="'Running — ' + currentPhase"></span>
-        </template>
-        <template x-if="!isRunning && viewingRunId">
-          <span class="status-badge done">Completed</span>
-        </template>
-        <template x-if="!isRunning && !viewingRunId">
-          <span class="status-badge idle">Idle</span>
-        </template>
-        <span x-show="experimentInfo" x-text="experimentInfo" style="color: var(--text-dim); font-size: 12px;"></span>
-        <span x-show="requestProgress" x-text="requestProgress" style="margin-left: auto; font-size: 12px;"></span>
-      </div>
+      <!-- Pipeline stepper (when running) -->
+      <template x-if="isRunning">
+        <div class="pipeline-stepper">
+          <template x-for="(step, idx) in pipelineSteps" :key="step.id">
+            <div class="pipeline-step" :class="'step-' + step.status">
+              <div class="step-indicator">
+                <template x-if="step.status === 'completed'">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2.5 7 5.5 10 11.5 4"/></svg>
+                </template>
+                <template x-if="step.status === 'skipped'">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="6" x2="10" y2="6"/></svg>
+                </template>
+                <template x-if="step.status === 'pending' || step.status === 'active'">
+                  <span x-text="idx + 1"></span>
+                </template>
+              </div>
+              <span class="step-label" x-text="step.label"></span>
+              <span class="step-detail" x-text="step.detail" x-show="step.detail"></span>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Status badge (when idle/completed) -->
+      <template x-if="!isRunning">
+        <div class="status-banner">
+          <template x-if="viewingRunId">
+            <span class="status-badge done">Completed</span>
+          </template>
+          <template x-if="!viewingRunId">
+            <span class="status-badge idle">Idle</span>
+          </template>
+          <span x-show="experimentInfo" x-text="experimentInfo" style="color: var(--text-dim); font-size: 12px;"></span>
+          <span x-show="requestProgress" x-text="requestProgress" style="margin-left: auto; font-size: 12px;"></span>
+        </div>
+      </template>
 
       <!-- Charts 2x3 grid -->
       <div class="charts-grid">
@@ -589,6 +735,7 @@ function dashboard() {
     configs: [],
     selectedConfig: '',
     serverUrl: '',
+    sidebarOpen: true,
 
     // Active experiment
     isRunning: false,
@@ -616,6 +763,7 @@ function dashboard() {
     logs: [],
     logPaused: false,
     summaryData: null,
+    pipelineSteps: [],
 
     // Session runs (completed)
     sessionRuns: [],
@@ -631,6 +779,7 @@ function dashboard() {
 
     // Initialization
     init() {
+      this.pipelineSteps = this.freshPipeline();
       this.connectWs();
       this.fetchConfigs();
       this.initCharts();
@@ -639,6 +788,74 @@ function dashboard() {
     fmtNum(v) {
       if (v == null) return '—';
       return Number(v) >= 100 ? Math.round(v).toString() : Number(v).toFixed(1);
+    },
+
+    freshPipeline() {
+      return [
+        { id: 'provision', label: 'Create Pod', status: 'pending', detail: '' },
+        { id: 'model',     label: 'Load Model', status: 'pending', detail: '' },
+        { id: 'execute',   label: 'Execute',    status: 'pending', detail: '' },
+        { id: 'cleanup',   label: 'Cleanup',    status: 'pending', detail: '' },
+      ];
+    },
+
+    updatePipeline(phase, data) {
+      const steps = this.pipelineSteps;
+      const byId = (id) => steps.find(s => s.id === id);
+
+      switch (phase) {
+        case 'provisioning':
+          byId('provision').status = 'active';
+          byId('provision').detail = `${data.gpu_type || 'GPU'} x${data.gpu_count || 1}`;
+          break;
+        case 'provisioning_skipped':
+          byId('provision').status = 'skipped';
+          byId('provision').detail = 'Skipped';
+          break;
+        case 'provisioning_done':
+          byId('provision').status = 'completed';
+          break;
+        case 'model_loading':
+          if (byId('provision').status === 'pending') byId('provision').status = 'completed';
+          byId('model').status = 'active';
+          byId('model').detail = data.model || '';
+          break;
+        case 'model_loading_done':
+          byId('model').status = 'completed';
+          byId('model').detail = `${data.elapsed_s || 0}s`;
+          break;
+        case 'execution':
+          if (byId('model').status !== 'completed') byId('model').status = 'completed';
+          byId('execute').status = 'active';
+          byId('execute').detail = `0/${data.total_requests || 0} requests`;
+          break;
+        case 'cleanup':
+          if (byId('execute').status === 'active') byId('execute').status = 'completed';
+          byId('cleanup').status = 'active';
+          byId('cleanup').detail = 'Terminating pod...';
+          break;
+        case 'done':
+          byId('cleanup').status = 'completed';
+          byId('cleanup').detail = '';
+          break;
+      }
+    },
+
+    toggleSidebar() {
+      this.sidebarOpen = !this.sidebarOpen;
+      setTimeout(() => this.resizeAllCharts(), 350);
+    },
+
+    resizeAllCharts() {
+      const ids = [
+        'chart-kv', 'chart-reqs', 'chart-ttft',
+        'chart-throughput', 'chart-e2e', 'chart-timeline',
+        'compare-kv', 'compare-reqs', 'compare-ttft', 'compare-e2e',
+      ];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el && el.data) Plotly.Plots.resize(el);
+      }
     },
 
     // ------------------------------------------------------------------
@@ -692,6 +909,8 @@ function dashboard() {
     onPhase(msg) {
       const phase = msg.phase;
       const data = msg.data || {};
+
+      this.updatePipeline(phase, data);
 
       switch (phase) {
         case 'provisioning':
@@ -756,6 +975,12 @@ function dashboard() {
       const d = msg.data;
       this.completedCount++;
       this.requestProgress = `${this.completedCount}/${this.totalCount}`;
+
+      // Update pipeline execute step detail
+      const execStep = this.pipelineSteps.find(s => s.id === 'execute');
+      if (execStep && execStep.status === 'active') {
+        execStep.detail = `${this.completedCount}/${this.totalCount} requests`;
+      }
 
       if (d.ttft_ms != null) this.ttftValues.push(d.ttft_ms);
       if (d.e2e_latency_ms != null) this.e2eValues.push(d.e2e_latency_ms);
@@ -843,6 +1068,7 @@ function dashboard() {
       this.currentPhase = '';
       this.experimentInfo = '';
       this.requestProgress = '';
+      this.pipelineSteps = this.freshPipeline();
       this.initCharts();
     },
 
