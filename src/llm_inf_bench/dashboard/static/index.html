@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>llm-inf-bench Dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg-card: #1a1d27;
+    --bg-sidebar: #141720;
+    --border: #2a2d3a;
+    --text: #e0e0e6;
+    --text-dim: #8b8fa3;
+    --accent: #6c5ce7;
+    --accent-hover: #7c6df7;
+    --green: #00b894;
+    --yellow: #fdcb6e;
+    --red: #e17055;
+    --blue: #74b9ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 48px 1fr;
+    height: 100vh;
+  }
+  /* Header */
+  .header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+  }
+  .header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+  .header h1 span { color: var(--accent); }
+  .conn-status {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim);
+  }
+  .conn-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red);
+  }
+  .conn-dot.connected { background: var(--green); }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .sidebar h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .sidebar select, .sidebar input {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .sidebar select:focus, .sidebar input:focus { outline: none; border-color: var(--accent); }
+  .sidebar label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; display: block; }
+  .btn {
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-start { background: var(--accent); color: white; }
+  .btn-start:hover { background: var(--accent-hover); }
+  .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-stop { background: var(--red); color: white; }
+  .btn-stop:hover { opacity: 0.9; }
+  .run-list { list-style: none; }
+  .run-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .run-item:hover { background: var(--bg); }
+  .run-item.active { background: var(--bg); border: 1px solid var(--accent); }
+  .run-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .run-dot.running { background: var(--green); animation: pulse 1.5s infinite; }
+  .run-dot.completed { background: var(--blue); }
+  .run-dot.failed { background: var(--red); }
+  .run-dot.partial { background: var(--yellow); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Main */
+  .main {
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Status banner */
+  .status-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .status-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .status-badge.running { background: rgba(0,184,148,0.15); color: var(--green); }
+  .status-badge.idle { background: rgba(139,143,163,0.15); color: var(--text-dim); }
+  .status-badge.done { background: rgba(116,185,255,0.15); color: var(--blue); }
+
+  /* Charts grid */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .chart-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 280px;
+  }
+  .chart-card h4 {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .chart-container { height: 240px; }
+
+  /* Log panel */
+  .log-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .log-panel h4 {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .log-line { padding: 2px 0; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; }
+  .log-line .ts { color: var(--text-dim); opacity: 0.6; }
+  .log-line.warning { color: var(--yellow); }
+  .log-line.error { color: var(--red); }
+
+  /* Summary panel */
+  .summary-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .summary-panel h4 {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .stat-card {
+    padding: 10px;
+    background: var(--bg);
+    border-radius: 6px;
+  }
+  .stat-label { font-size: 11px; color: var(--text-dim); }
+  .stat-value { font-size: 18px; font-weight: 600; margin-top: 4px; }
+
+  /* History tab */
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .results-table th {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .results-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .results-table tr { cursor: pointer; }
+  .results-table tr:hover td { background: var(--bg-card); }
+
+  /* Compare tab */
+  .compare-controls {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+  }
+  .compare-controls select {
+    padding: 8px 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    min-width: 250px;
+  }
+  .compare-side {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .compare-col {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .compare-col h4 { font-size: 13px; margin-bottom: 12px; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="layout" x-data="dashboard()">
+  <!-- Header -->
+  <div class="header">
+    <h1><span>llm-inf-bench</span> Dashboard</h1>
+    <div class="conn-status">
+      <div class="conn-dot" :class="{ connected: wsConnected }"></div>
+      <span x-text="wsConnected ? 'Connected' : 'Disconnected'"></span>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div>
+      <h3>New Experiment</h3>
+      <label>Config</label>
+      <select x-model="selectedConfig" style="margin-bottom: 8px;">
+        <option value="">Select config...</option>
+        <template x-for="c in configs" :key="c.path">
+          <option :value="c.path" x-text="c.relative"></option>
+        </template>
+      </select>
+      <label>Server URL (optional)</label>
+      <input type="text" x-model="serverUrl" placeholder="https://..." style="margin-bottom: 10px;">
+      <template x-if="!isRunning">
+        <button class="btn btn-start" @click="startExperiment()" :disabled="!selectedConfig || !wsConnected">
+          Start Experiment
+        </button>
+      </template>
+      <template x-if="isRunning">
+        <button class="btn btn-stop" @click="stopExperiment()">
+          Stop Experiment
+        </button>
+      </template>
+    </div>
+
+    <div>
+      <h3>Session Runs</h3>
+      <ul class="run-list">
+        <template x-if="activeRunId">
+          <li class="run-item" :class="{ active: viewingRunId === activeRunId }" @click="viewRun(activeRunId)">
+            <div class="run-dot running"></div>
+            <span x-text="activeRunId" style="font-size:11px; overflow:hidden; text-overflow:ellipsis;"></span>
+          </li>
+        </template>
+        <template x-for="r in sessionRuns" :key="r.run_id">
+          <li class="run-item" :class="{ active: viewingRunId === r.run_id }" @click="viewRun(r.run_id)">
+            <div class="run-dot" :class="r.status"></div>
+            <span x-text="r.experiment_name" style="font-size:11px; overflow:hidden; text-overflow:ellipsis;"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab" :class="{ active: tab === 'live' }" @click="tab = 'live'">Live</div>
+      <div class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'; loadHistory()">History</div>
+      <div class="tab" :class="{ active: tab === 'compare' }" @click="tab = 'compare'; loadHistory()">Compare</div>
+    </div>
+
+    <!-- LIVE TAB -->
+    <div x-show="tab === 'live'" x-cloak>
+      <!-- Status banner -->
+      <div class="status-banner">
+        <template x-if="isRunning">
+          <span class="status-badge running" x-text="'Running — ' + currentPhase"></span>
+        </template>
+        <template x-if="!isRunning && viewingRunId">
+          <span class="status-badge done">Completed</span>
+        </template>
+        <template x-if="!isRunning && !viewingRunId">
+          <span class="status-badge idle">Idle</span>
+        </template>
+        <span x-show="experimentInfo" x-text="experimentInfo" style="color: var(--text-dim); font-size: 12px;"></span>
+        <span x-show="requestProgress" x-text="requestProgress" style="margin-left: auto; font-size: 12px;"></span>
+      </div>
+
+      <!-- Charts 2x3 grid -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h4>KV Cache Usage (%)</h4>
+          <div id="chart-kv" class="chart-container"></div>
+        </div>
+        <div class="chart-card">
+          <h4>Active & Queued Requests</h4>
+          <div id="chart-reqs" class="chart-container"></div>
+        </div>
+        <div class="chart-card">
+          <h4>TTFT Distribution (ms)</h4>
+          <div id="chart-ttft" class="chart-container"></div>
+        </div>
+        <div class="chart-card">
+          <h4>Throughput (tok/s)</h4>
+          <div id="chart-throughput" class="chart-container"></div>
+        </div>
+        <div class="chart-card">
+          <h4>E2E Latency Distribution (ms)</h4>
+          <div id="chart-e2e" class="chart-container"></div>
+        </div>
+        <div class="chart-card">
+          <h4>Request Timeline</h4>
+          <div id="chart-timeline" class="chart-container"></div>
+        </div>
+      </div>
+
+      <!-- Log panel -->
+      <div class="log-panel" x-ref="logPanel" @mouseenter="logPaused = true" @mouseleave="logPaused = false">
+        <h4>Logs</h4>
+        <template x-for="(l, i) in logs" :key="i">
+          <div class="log-line" :class="l.level">
+            <span class="ts" x-text="l.ts"></span> <span x-text="'[' + l.level.toUpperCase() + ']'"></span> <span x-text="l.message"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Summary panel (after completion) -->
+      <template x-if="summaryData">
+        <div class="summary-panel">
+          <h4>Summary</h4>
+          <div class="summary-grid">
+            <div class="stat-card">
+              <div class="stat-label">Requests</div>
+              <div class="stat-value" x-text="summaryData.successful_requests + '/' + summaryData.total_requests"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Token Throughput</div>
+              <div class="stat-value" x-text="fmtNum(summaryData.tokens_per_second) + ' tok/s'"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Duration</div>
+              <div class="stat-value" x-text="fmtNum(summaryData.total_duration_s) + 's'"></div>
+            </div>
+            <template x-if="summaryData.ttft">
+              <div class="stat-card">
+                <div class="stat-label">TTFT p50 / p95 / p99</div>
+                <div class="stat-value" x-text="fmtNum(summaryData.ttft.p50) + ' / ' + fmtNum(summaryData.ttft.p95) + ' / ' + fmtNum(summaryData.ttft.p99) + ' ms'"></div>
+              </div>
+            </template>
+            <template x-if="summaryData.e2e_latency">
+              <div class="stat-card">
+                <div class="stat-label">E2E p50 / p95 / p99</div>
+                <div class="stat-value" x-text="fmtNum(summaryData.e2e_latency.p50) + ' / ' + fmtNum(summaryData.e2e_latency.p95) + ' / ' + fmtNum(summaryData.e2e_latency.p99) + ' ms'"></div>
+              </div>
+            </template>
+            <template x-if="summaryData.tbt">
+              <div class="stat-card">
+                <div class="stat-label">TBT p50 / p95</div>
+                <div class="stat-value" x-text="fmtNum(summaryData.tbt.p50) + ' / ' + fmtNum(summaryData.tbt.p95) + ' ms'"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- HISTORY TAB -->
+    <div x-show="tab === 'history'" x-cloak>
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>Status</th>
+            <th>Framework</th>
+            <th>Model</th>
+            <th>Requests</th>
+            <th>Throughput</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in historyResults" :key="r.run_id">
+            <tr @click="loadHistoryResult(r.run_id)">
+              <td x-text="r.run_id" style="font-size:12px;"></td>
+              <td><span class="status-badge" :class="r.status === 'completed' ? 'done' : ''" x-text="r.status"></span></td>
+              <td x-text="r.experiment?.framework || '?'"></td>
+              <td x-text="r.experiment?.model?.name || '?'" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;"></td>
+              <td x-text="(r.summary?.successful_requests || 0) + '/' + (r.summary?.total_requests || 0)"></td>
+              <td x-text="r.summary?.tokens_per_second ? fmtNum(r.summary.tokens_per_second) + ' tok/s' : '—'"></td>
+              <td x-text="(r.metadata?.started_at || '').substring(0, 10)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <p x-show="historyResults.length === 0" style="color: var(--text-dim); padding: 24px; text-align: center;">
+        No results found in results/ directory.
+      </p>
+    </div>
+
+    <!-- COMPARE TAB -->
+    <div x-show="tab === 'compare'" x-cloak>
+      <div class="compare-controls">
+        <div>
+          <label style="font-size:12px; color: var(--text-dim);">Run A</label>
+          <select x-model="compareA">
+            <option value="">Select run...</option>
+            <template x-for="r in historyResults" :key="'a-'+r.run_id">
+              <option :value="r.run_id" x-text="r.run_id"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12px; color: var(--text-dim);">Run B</label>
+          <select x-model="compareB">
+            <option value="">Select run...</option>
+            <template x-for="r in historyResults" :key="'b-'+r.run_id">
+              <option :value="r.run_id" x-text="r.run_id"></option>
+            </template>
+          </select>
+        </div>
+        <button class="btn btn-start" style="width:auto;padding:8px 20px;" @click="runCompare()" :disabled="!compareA || !compareB">
+          Compare
+        </button>
+      </div>
+
+      <template x-if="compareDataA && compareDataB">
+        <div>
+          <div class="compare-side" style="margin-bottom: 16px;">
+            <div class="compare-col">
+              <h4 x-text="compareDataA.run_id"></h4>
+              <template x-if="compareDataA.summary">
+                <div class="summary-grid">
+                  <div class="stat-card"><div class="stat-label">Requests</div><div class="stat-value" x-text="compareDataA.summary.successful_requests + '/' + compareDataA.summary.total_requests"></div></div>
+                  <div class="stat-card"><div class="stat-label">Throughput</div><div class="stat-value" x-text="fmtNum(compareDataA.summary.tokens_per_second) + ' tok/s'"></div></div>
+                  <template x-if="compareDataA.summary.ttft"><div class="stat-card"><div class="stat-label">TTFT p50</div><div class="stat-value" x-text="fmtNum(compareDataA.summary.ttft.p50) + ' ms'"></div></div></template>
+                  <template x-if="compareDataA.summary.e2e_latency"><div class="stat-card"><div class="stat-label">E2E p50</div><div class="stat-value" x-text="fmtNum(compareDataA.summary.e2e_latency.p50) + ' ms'"></div></div></template>
+                </div>
+              </template>
+            </div>
+            <div class="compare-col">
+              <h4 x-text="compareDataB.run_id"></h4>
+              <template x-if="compareDataB.summary">
+                <div class="summary-grid">
+                  <div class="stat-card"><div class="stat-label">Requests</div><div class="stat-value" x-text="compareDataB.summary.successful_requests + '/' + compareDataB.summary.total_requests"></div></div>
+                  <div class="stat-card"><div class="stat-label">Throughput</div><div class="stat-value" x-text="fmtNum(compareDataB.summary.tokens_per_second) + ' tok/s'"></div></div>
+                  <template x-if="compareDataB.summary.ttft"><div class="stat-card"><div class="stat-label">TTFT p50</div><div class="stat-value" x-text="fmtNum(compareDataB.summary.ttft.p50) + ' ms'"></div></div></template>
+                  <template x-if="compareDataB.summary.e2e_latency"><div class="stat-card"><div class="stat-label">E2E p50</div><div class="stat-value" x-text="fmtNum(compareDataB.summary.e2e_latency.p50) + ' ms'"></div></div></template>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Compare charts -->
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h4>KV Cache Usage</h4>
+              <div id="compare-kv" class="chart-container"></div>
+            </div>
+            <div class="chart-card">
+              <h4>Active Requests</h4>
+              <div id="compare-reqs" class="chart-container"></div>
+            </div>
+            <div class="chart-card">
+              <h4>TTFT Distribution</h4>
+              <div id="compare-ttft" class="chart-container"></div>
+            </div>
+            <div class="chart-card">
+              <h4>E2E Latency Distribution</h4>
+              <div id="compare-e2e" class="chart-container"></div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+const CHART_LAYOUT = {
+  paper_bgcolor: 'rgba(0,0,0,0)',
+  plot_bgcolor: 'rgba(0,0,0,0)',
+  font: { color: '#8b8fa3', size: 11 },
+  margin: { t: 10, r: 10, b: 40, l: 50 },
+  xaxis: { gridcolor: '#2a2d3a', zerolinecolor: '#2a2d3a' },
+  yaxis: { gridcolor: '#2a2d3a', zerolinecolor: '#2a2d3a' },
+  showlegend: false,
+};
+
+const CHART_CONFIG = { responsive: true, displayModeBar: false };
+
+function dashboard() {
+  return {
+    // Connection
+    wsConnected: false,
+    ws: null,
+    reconnectDelay: 1000,
+
+    // UI state
+    tab: 'live',
+    configs: [],
+    selectedConfig: '',
+    serverUrl: '',
+
+    // Active experiment
+    isRunning: false,
+    activeRunId: null,
+    viewingRunId: null,
+    currentPhase: '',
+    experimentInfo: '',
+    requestProgress: '',
+
+    // Data stores (keyed by run_id)
+    runData: {},
+
+    // Live view references
+    gpuTimestamps: [],
+    kvData: [],
+    activeReqData: [],
+    queuedReqData: [],
+    throughputData: [],
+    throughputTimestamps: [],
+    ttftValues: [],
+    e2eValues: [],
+    requestTimeline: [],
+    completedCount: 0,
+    totalCount: 0,
+    logs: [],
+    logPaused: false,
+    summaryData: null,
+
+    // Session runs (completed)
+    sessionRuns: [],
+
+    // History
+    historyResults: [],
+
+    // Compare
+    compareA: '',
+    compareB: '',
+    compareDataA: null,
+    compareDataB: null,
+
+    // Initialization
+    init() {
+      this.connectWs();
+      this.fetchConfigs();
+      this.initCharts();
+    },
+
+    fmtNum(v) {
+      if (v == null) return '—';
+      return Number(v) >= 100 ? Math.round(v).toString() : Number(v).toFixed(1);
+    },
+
+    // ------------------------------------------------------------------
+    // WebSocket
+    // ------------------------------------------------------------------
+    connectWs() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+      this.ws.onopen = () => {
+        this.wsConnected = true;
+        this.reconnectDelay = 1000;
+      };
+
+      this.ws.onclose = () => {
+        this.wsConnected = false;
+        setTimeout(() => {
+          this.reconnectDelay = Math.min(this.reconnectDelay * 2, 16000);
+          this.connectWs();
+        }, this.reconnectDelay);
+      };
+
+      this.ws.onerror = () => {};
+
+      this.ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        this.handleMessage(msg);
+      };
+    },
+
+    handleMessage(msg) {
+      switch (msg.type) {
+        case 'phase': this.onPhase(msg); break;
+        case 'gpu_sample': this.onGpuSample(msg); break;
+        case 'request_complete': this.onRequestComplete(msg); break;
+        case 'log': this.onLog(msg); break;
+        case 'summary': this.onSummary(msg); break;
+        case 'error': this.onError(msg); break;
+        case 'experiment_started':
+          this.activeRunId = msg.run_id;
+          this.viewingRunId = msg.run_id;
+          this.isRunning = true;
+          this.tab = 'live';
+          break;
+        case 'experiment_stopping':
+          this.currentPhase = 'Stopping...';
+          break;
+      }
+    },
+
+    onPhase(msg) {
+      const phase = msg.phase;
+      const data = msg.data || {};
+
+      switch (phase) {
+        case 'provisioning':
+          this.currentPhase = 'Provisioning';
+          this.experimentInfo = `${data.gpu_type || ''} x${data.gpu_count || 1}`;
+          break;
+        case 'provisioning_skipped':
+          this.currentPhase = 'Provisioning (skipped)';
+          this.experimentInfo = data.server_url || '';
+          break;
+        case 'provisioning_done':
+          this.currentPhase = 'Provisioned';
+          break;
+        case 'model_loading':
+          this.currentPhase = 'Loading model';
+          this.experimentInfo += ` | ${data.model || ''}`;
+          break;
+        case 'model_loading_done':
+          this.currentPhase = `Model loaded (${data.elapsed_s || 0}s)`;
+          break;
+        case 'execution':
+          this.currentPhase = 'Executing';
+          this.totalCount = data.total_requests || 0;
+          this.completedCount = 0;
+          this.requestProgress = `0/${this.totalCount}`;
+          break;
+        case 'sweep_iteration':
+          this.currentPhase = `Sweep ${data.iteration}/${data.total}`;
+          break;
+        case 'cleanup':
+          this.currentPhase = 'Cleaning up';
+          break;
+        case 'done':
+          this.currentPhase = 'Done';
+          this.isRunning = false;
+          this.sessionRuns.unshift({
+            run_id: msg.run_id,
+            experiment_name: msg.run_id,
+            status: data.status || 'completed',
+          });
+          this.activeRunId = null;
+          break;
+      }
+    },
+
+    onGpuSample(msg) {
+      const d = msg.data;
+      this.gpuTimestamps.push(d.timestamp);
+      this.kvData.push(d.kv_cache_usage != null ? d.kv_cache_usage * 100 : null);
+      this.activeReqData.push(d.active_requests);
+      this.queuedReqData.push(d.queued_requests);
+
+      if (d.generation_throughput != null) {
+        this.throughputTimestamps.push(d.timestamp);
+        this.throughputData.push(d.generation_throughput);
+      }
+
+      this.updateGpuCharts();
+    },
+
+    onRequestComplete(msg) {
+      const d = msg.data;
+      this.completedCount++;
+      this.requestProgress = `${this.completedCount}/${this.totalCount}`;
+
+      if (d.ttft_ms != null) this.ttftValues.push(d.ttft_ms);
+      if (d.e2e_latency_ms != null) this.e2eValues.push(d.e2e_latency_ms);
+
+      // Timeline data
+      this.requestTimeline.push({
+        index: d.request_index,
+        e2e: d.e2e_latency_ms || 0,
+        error: d.error != null,
+      });
+
+      this.updateRequestCharts();
+    },
+
+    onLog(msg) {
+      const ts = msg.timestamp ? msg.timestamp.substring(11, 19) : '';
+      this.logs.push({ ts, level: msg.level, message: msg.message });
+      if (this.logs.length > 500) this.logs.splice(0, this.logs.length - 500);
+      if (!this.logPaused) {
+        this.$nextTick(() => {
+          const el = this.$refs.logPanel;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      }
+    },
+
+    onSummary(msg) {
+      this.summaryData = msg.data;
+    },
+
+    onError(msg) {
+      this.logs.push({ ts: '', level: 'error', message: msg.message });
+    },
+
+    // ------------------------------------------------------------------
+    // Actions
+    // ------------------------------------------------------------------
+    async fetchConfigs() {
+      try {
+        const resp = await fetch('/api/configs');
+        this.configs = await resp.json();
+      } catch (e) {
+        console.error('Failed to fetch configs:', e);
+      }
+    },
+
+    startExperiment() {
+      if (!this.ws || !this.selectedConfig) return;
+      // Reset live data
+      this.resetLiveData();
+      this.ws.send(JSON.stringify({
+        type: 'start_experiment',
+        config_path: this.selectedConfig,
+        server_url: this.serverUrl || null,
+      }));
+    },
+
+    stopExperiment() {
+      if (!this.ws || !this.activeRunId) return;
+      this.ws.send(JSON.stringify({
+        type: 'stop_experiment',
+        run_id: this.activeRunId,
+      }));
+    },
+
+    viewRun(runId) {
+      this.viewingRunId = runId;
+      this.tab = 'live';
+    },
+
+    resetLiveData() {
+      this.gpuTimestamps = [];
+      this.kvData = [];
+      this.activeReqData = [];
+      this.queuedReqData = [];
+      this.throughputData = [];
+      this.throughputTimestamps = [];
+      this.ttftValues = [];
+      this.e2eValues = [];
+      this.requestTimeline = [];
+      this.completedCount = 0;
+      this.totalCount = 0;
+      this.logs = [];
+      this.summaryData = null;
+      this.currentPhase = '';
+      this.experimentInfo = '';
+      this.requestProgress = '';
+      this.initCharts();
+    },
+
+    // ------------------------------------------------------------------
+    // Charts
+    // ------------------------------------------------------------------
+    initCharts() {
+      const layout = JSON.parse(JSON.stringify(CHART_LAYOUT));
+
+      // KV Cache
+      Plotly.newPlot('chart-kv', [{
+        x: [], y: [], type: 'scatter', mode: 'lines',
+        line: { color: '#6c5ce7', width: 1.5 },
+      }], {
+        ...layout,
+        yaxis: { ...layout.yaxis, title: '%', range: [0, 100] },
+        xaxis: { ...layout.xaxis, title: 'Time (s)' },
+      }, CHART_CONFIG);
+
+      // Active/Queued requests
+      Plotly.newPlot('chart-reqs', [
+        { x: [], y: [], type: 'scatter', mode: 'lines', name: 'Active', line: { color: '#74b9ff', width: 1.5 } },
+        { x: [], y: [], type: 'scatter', mode: 'lines', name: 'Queued', line: { color: '#fdcb6e', width: 1.5 } },
+      ], {
+        ...layout,
+        showlegend: true,
+        legend: { x: 0.01, y: 0.99, bgcolor: 'rgba(0,0,0,0)' },
+        xaxis: { ...layout.xaxis, title: 'Time (s)' },
+      }, CHART_CONFIG);
+
+      // TTFT histogram
+      Plotly.newPlot('chart-ttft', [{
+        x: [], type: 'histogram',
+        marker: { color: 'rgba(0,184,148,0.6)', line: { color: '#00b894', width: 1 } },
+      }], {
+        ...layout,
+        xaxis: { ...layout.xaxis, title: 'ms' },
+        yaxis: { ...layout.yaxis, title: 'Count' },
+      }, CHART_CONFIG);
+
+      // Throughput
+      Plotly.newPlot('chart-throughput', [{
+        x: [], y: [], type: 'scatter', mode: 'lines',
+        line: { color: '#00b894', width: 1.5 },
+      }], {
+        ...layout,
+        xaxis: { ...layout.xaxis, title: 'Time (s)' },
+        yaxis: { ...layout.yaxis, title: 'tok/s' },
+      }, CHART_CONFIG);
+
+      // E2E histogram
+      Plotly.newPlot('chart-e2e', [{
+        x: [], type: 'histogram',
+        marker: { color: 'rgba(116,185,255,0.6)', line: { color: '#74b9ff', width: 1 } },
+      }], {
+        ...layout,
+        xaxis: { ...layout.xaxis, title: 'ms' },
+        yaxis: { ...layout.yaxis, title: 'Count' },
+      }, CHART_CONFIG);
+
+      // Request timeline (horizontal bar chart)
+      Plotly.newPlot('chart-timeline', [{
+        x: [], y: [], type: 'bar', orientation: 'h',
+        marker: { color: [] },
+      }], {
+        ...layout,
+        xaxis: { ...layout.xaxis, title: 'Latency (ms)' },
+        yaxis: { ...layout.yaxis, title: 'Request #', autorange: 'reversed' },
+      }, CHART_CONFIG);
+    },
+
+    updateGpuCharts() {
+      const n = this.gpuTimestamps.length;
+      // Extend KV cache trace
+      Plotly.extendTraces('chart-kv', {
+        x: [[this.gpuTimestamps[n-1]]],
+        y: [[this.kvData[n-1]]],
+      }, [0]);
+
+      // Extend active/queued traces
+      Plotly.extendTraces('chart-reqs', {
+        x: [[this.gpuTimestamps[n-1]], [this.gpuTimestamps[n-1]]],
+        y: [[this.activeReqData[n-1]], [this.queuedReqData[n-1]]],
+      }, [0, 1]);
+
+      // Extend throughput
+      if (this.throughputData.length > 0) {
+        const tn = this.throughputData.length;
+        Plotly.extendTraces('chart-throughput', {
+          x: [[this.throughputTimestamps[tn-1]]],
+          y: [[this.throughputData[tn-1]]],
+        }, [0]);
+      }
+    },
+
+    updateRequestCharts() {
+      // Rebuild histograms (cheap for <1000 points)
+      Plotly.react('chart-ttft', [{
+        x: this.ttftValues, type: 'histogram',
+        marker: { color: 'rgba(0,184,148,0.6)', line: { color: '#00b894', width: 1 } },
+      }], document.getElementById('chart-ttft').layout, CHART_CONFIG);
+
+      Plotly.react('chart-e2e', [{
+        x: this.e2eValues, type: 'histogram',
+        marker: { color: 'rgba(116,185,255,0.6)', line: { color: '#74b9ff', width: 1 } },
+      }], document.getElementById('chart-e2e').layout, CHART_CONFIG);
+
+      // Timeline
+      const colors = this.requestTimeline.map(r => r.error ? '#e17055' : '#74b9ff');
+      Plotly.react('chart-timeline', [{
+        x: this.requestTimeline.map(r => r.e2e),
+        y: this.requestTimeline.map(r => '#' + r.index),
+        type: 'bar', orientation: 'h',
+        marker: { color: colors },
+      }], document.getElementById('chart-timeline').layout, CHART_CONFIG);
+    },
+
+    // ------------------------------------------------------------------
+    // History tab
+    // ------------------------------------------------------------------
+    async loadHistory() {
+      try {
+        const resp = await fetch('/api/results');
+        this.historyResults = await resp.json();
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      }
+    },
+
+    async loadHistoryResult(runId) {
+      try {
+        const resp = await fetch(`/api/results/${encodeURIComponent(runId)}`);
+        const data = await resp.json();
+        if (data.error) return;
+
+        // Switch to live tab and render stored data
+        this.resetLiveData();
+        this.viewingRunId = runId;
+        this.tab = 'live';
+        this.summaryData = data.summary;
+        this.experimentInfo = `${data.experiment?.framework || ''} | ${data.experiment?.model?.name || ''}`;
+
+        // Populate GPU charts from stored time series
+        if (data.gpu_metrics && data.gpu_metrics.time_series) {
+          for (const s of data.gpu_metrics.time_series) {
+            this.gpuTimestamps.push(s.timestamp);
+            this.kvData.push(s.kv_cache_usage != null ? s.kv_cache_usage * 100 : null);
+            this.activeReqData.push(s.active_requests);
+            this.queuedReqData.push(s.queued_requests);
+            if (s.generation_throughput != null) {
+              this.throughputTimestamps.push(s.timestamp);
+              this.throughputData.push(s.generation_throughput);
+            }
+          }
+          this.rebuildGpuCharts();
+        }
+
+        // Populate request charts from stored requests
+        if (data.requests) {
+          for (const r of data.requests) {
+            if (r.ttft_ms != null) this.ttftValues.push(r.ttft_ms);
+            if (r.e2e_latency_ms != null) this.e2eValues.push(r.e2e_latency_ms);
+            this.requestTimeline.push({
+              index: r.request_index,
+              e2e: r.e2e_latency_ms || 0,
+              error: r.error != null,
+            });
+          }
+          this.totalCount = data.requests.length;
+          this.completedCount = data.requests.length;
+          this.requestProgress = `${this.completedCount}/${this.totalCount}`;
+          this.updateRequestCharts();
+        }
+      } catch (e) {
+        console.error('Failed to load result:', e);
+      }
+    },
+
+    rebuildGpuCharts() {
+      const layout = JSON.parse(JSON.stringify(CHART_LAYOUT));
+
+      Plotly.react('chart-kv', [{
+        x: this.gpuTimestamps, y: this.kvData, type: 'scatter', mode: 'lines',
+        line: { color: '#6c5ce7', width: 1.5 },
+      }], {
+        ...layout,
+        yaxis: { ...layout.yaxis, title: '%', range: [0, 100] },
+        xaxis: { ...layout.xaxis, title: 'Time (s)' },
+      }, CHART_CONFIG);
+
+      Plotly.react('chart-reqs', [
+        { x: this.gpuTimestamps, y: this.activeReqData, type: 'scatter', mode: 'lines', name: 'Active', line: { color: '#74b9ff', width: 1.5 } },
+        { x: this.gpuTimestamps, y: this.queuedReqData, type: 'scatter', mode: 'lines', name: 'Queued', line: { color: '#fdcb6e', width: 1.5 } },
+      ], {
+        ...layout,
+        showlegend: true,
+        legend: { x: 0.01, y: 0.99, bgcolor: 'rgba(0,0,0,0)' },
+        xaxis: { ...layout.xaxis, title: 'Time (s)' },
+      }, CHART_CONFIG);
+
+      Plotly.react('chart-throughput', [{
+        x: this.throughputTimestamps, y: this.throughputData, type: 'scatter', mode: 'lines',
+        line: { color: '#00b894', width: 1.5 },
+      }], {
+        ...layout,
+        xaxis: { ...layout.xaxis, title: 'Time (s)' },
+        yaxis: { ...layout.yaxis, title: 'tok/s' },
+      }, CHART_CONFIG);
+    },
+
+    // ------------------------------------------------------------------
+    // Compare tab
+    // ------------------------------------------------------------------
+    async runCompare() {
+      if (!this.compareA || !this.compareB) return;
+      try {
+        const [respA, respB] = await Promise.all([
+          fetch(`/api/results/${encodeURIComponent(this.compareA)}`),
+          fetch(`/api/results/${encodeURIComponent(this.compareB)}`),
+        ]);
+        this.compareDataA = await respA.json();
+        this.compareDataB = await respB.json();
+
+        this.$nextTick(() => this.renderCompareCharts());
+      } catch (e) {
+        console.error('Failed to load compare data:', e);
+      }
+    },
+
+    renderCompareCharts() {
+      const layout = JSON.parse(JSON.stringify(CHART_LAYOUT));
+      layout.showlegend = true;
+      layout.legend = { x: 0.01, y: 0.99, bgcolor: 'rgba(0,0,0,0)' };
+
+      const extractGpu = (data) => {
+        const ts = [], kv = [], active = [];
+        if (data.gpu_metrics && data.gpu_metrics.time_series) {
+          for (const s of data.gpu_metrics.time_series) {
+            ts.push(s.timestamp);
+            kv.push(s.kv_cache_usage != null ? s.kv_cache_usage * 100 : null);
+            active.push(s.active_requests);
+          }
+        }
+        return { ts, kv, active };
+      };
+
+      const a = extractGpu(this.compareDataA);
+      const b = extractGpu(this.compareDataB);
+
+      // KV Cache
+      Plotly.newPlot('compare-kv', [
+        { x: a.ts, y: a.kv, type: 'scatter', mode: 'lines', name: 'A', line: { color: '#6c5ce7', width: 1.5 } },
+        { x: b.ts, y: b.kv, type: 'scatter', mode: 'lines', name: 'B', line: { color: '#00b894', width: 1.5 } },
+      ], { ...layout, yaxis: { ...layout.yaxis, title: '%', range: [0, 100] } }, CHART_CONFIG);
+
+      // Active requests
+      Plotly.newPlot('compare-reqs', [
+        { x: a.ts, y: a.active, type: 'scatter', mode: 'lines', name: 'A', line: { color: '#6c5ce7', width: 1.5 } },
+        { x: b.ts, y: b.active, type: 'scatter', mode: 'lines', name: 'B', line: { color: '#00b894', width: 1.5 } },
+      ], layout, CHART_CONFIG);
+
+      // TTFT histograms
+      const ttftA = (this.compareDataA.requests || []).filter(r => r.ttft_ms != null).map(r => r.ttft_ms);
+      const ttftB = (this.compareDataB.requests || []).filter(r => r.ttft_ms != null).map(r => r.ttft_ms);
+      Plotly.newPlot('compare-ttft', [
+        { x: ttftA, type: 'histogram', name: 'A', opacity: 0.6, marker: { color: '#6c5ce7' } },
+        { x: ttftB, type: 'histogram', name: 'B', opacity: 0.6, marker: { color: '#00b894' } },
+      ], { ...layout, barmode: 'overlay', xaxis: { ...layout.xaxis, title: 'ms' } }, CHART_CONFIG);
+
+      // E2E histograms
+      const e2eA = (this.compareDataA.requests || []).filter(r => r.e2e_latency_ms != null).map(r => r.e2e_latency_ms);
+      const e2eB = (this.compareDataB.requests || []).filter(r => r.e2e_latency_ms != null).map(r => r.e2e_latency_ms);
+      Plotly.newPlot('compare-e2e', [
+        { x: e2eA, type: 'histogram', name: 'A', opacity: 0.6, marker: { color: '#6c5ce7' } },
+        { x: e2eB, type: 'histogram', name: 'B', opacity: 0.6, marker: { color: '#00b894' } },
+      ], { ...layout, barmode: 'overlay', xaxis: { ...layout.xaxis, title: 'ms' } }, CHART_CONFIG);
+    },
+  };
+}
+</script>
+</body>
+</html>

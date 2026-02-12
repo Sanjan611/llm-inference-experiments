@@ -146,6 +146,25 @@ def results_compare(
 
 
 @app.command()
+def dashboard(
+    port: int = typer.Option(8420, "--port", help="Port number for the dashboard server"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open browser"),
+) -> None:
+    """Launch the experiment dashboard with live metrics visualization."""
+    try:
+        from llm_inf_bench.dashboard.server import run_server
+    except ImportError:
+        console.print(
+            "[red]Dashboard dependencies not installed.[/red]\n"
+            "Install them with: [bold]uv sync --extra dashboard[/bold]"
+        )
+        raise typer.Exit(1)
+
+    console.print(f"Starting dashboard on [bold]http://localhost:{port}[/bold]")
+    run_server(port=port, open_browser=not no_browser)
+
+
+@app.command()
 def init() -> None:
     """Create default application config at ~/.llm-inf-bench/config.yaml."""
     APP_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
