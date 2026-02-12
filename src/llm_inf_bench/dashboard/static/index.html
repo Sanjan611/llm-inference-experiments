@@ -285,6 +285,56 @@
     border-right-color: transparent;
   }
 
+  /* Config preview */
+  .config-preview {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .config-preview .preview-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+  }
+  .config-preview .preview-label { color: var(--text-dim); }
+  .config-preview .preview-value { color: var(--text); font-weight: 500; text-align: right; }
+  .config-preview .preview-error { color: var(--red); font-size: 11px; }
+  .config-preview .preview-loading { color: var(--text-dim); font-size: 11px; }
+
+  /* Pod info bar */
+  .pod-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    background: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .pod-info-bar code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .pod-info-bar a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .pod-info-bar a:hover { text-decoration: underline; }
+  .pod-info-bar .separator {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+  }
+
   /* Charts grid */
   .charts-grid {
     display: grid;
@@ -440,6 +490,36 @@
           <option :value="c.path" x-text="c.relative"></option>
         </template>
       </select>
+      <!-- Config preview -->
+      <template x-if="configPreviewLoading">
+        <div class="config-preview"><span class="preview-loading">Loading preview...</span></div>
+      </template>
+      <template x-if="configPreviewError">
+        <div class="config-preview"><span class="preview-error" x-text="configPreviewError"></span></div>
+      </template>
+      <template x-if="configPreview && !configPreviewLoading">
+        <div class="config-preview">
+          <div class="preview-row"><span class="preview-label">Model</span><span class="preview-value" x-text="configPreview.model_name"></span></div>
+          <div class="preview-row"><span class="preview-label">Framework</span><span class="preview-value" x-text="configPreview.framework"></span></div>
+          <div class="preview-row"><span class="preview-label">GPU</span><span class="preview-value" x-text="configPreview.gpu_type + ' x' + configPreview.gpu_count"></span></div>
+          <div class="preview-row"><span class="preview-label">Workload</span><span class="preview-value" x-text="configPreview.workload_type"></span></div>
+          <div class="preview-row"><span class="preview-label">Requests</span><span class="preview-value" x-text="configPreview.request_count"></span></div>
+          <div class="preview-row"><span class="preview-label">Max Tokens</span><span class="preview-value" x-text="configPreview.max_tokens"></span></div>
+          <template x-if="configPreview.quantization">
+            <div class="preview-row"><span class="preview-label">Quantization</span><span class="preview-value" x-text="configPreview.quantization"></span></div>
+          </template>
+          <template x-if="configPreview.batch_size != null">
+            <div class="preview-row"><span class="preview-label">Batch Size</span><span class="preview-value" x-text="configPreview.batch_size"></span></div>
+          </template>
+          <template x-if="configPreview.concurrency != null">
+            <div class="preview-row"><span class="preview-label">Concurrency</span><span class="preview-value" x-text="configPreview.concurrency"></span></div>
+          </template>
+          <template x-if="configPreview.sweep">
+            <div class="preview-row"><span class="preview-label">Sweep</span><span class="preview-value" x-text="JSON.stringify(configPreview.sweep)"></span></div>
+          </template>
+        </div>
+      </template>
+
       <label>Server URL (optional)</label>
       <input type="text" x-model="serverUrl" placeholder="https://..." style="margin-bottom: 10px;">
       <template x-if="!isRunning">
@@ -484,8 +564,8 @@
 
     <!-- LIVE TAB -->
     <div x-show="tab === 'live'" x-cloak>
-      <!-- Pipeline stepper (when running) -->
-      <template x-if="isRunning">
+      <!-- Pipeline stepper (when running or completed) -->
+      <template x-if="isRunning || hasPipelineData">
         <div class="pipeline-stepper">
           <template x-for="(step, idx) in pipelineSteps" :key="step.id">
             <div class="pipeline-step" :class="'step-' + step.status">
@@ -507,8 +587,21 @@
         </div>
       </template>
 
-      <!-- Status badge (when idle/completed) -->
-      <template x-if="!isRunning">
+      <!-- Pod info bar -->
+      <template x-if="podInfo">
+        <div class="pod-info-bar">
+          <span>Pod: <code x-text="podInfo.pod_id"></code></span>
+          <div class="separator"></div>
+          <span x-show="podInfo.gpu_type" x-text="(podInfo.gpu_type || '') + (podInfo.gpu_count > 1 ? ' x' + podInfo.gpu_count : '')"></span>
+          <template x-if="podInfo.cost_per_hr != null">
+            <span x-text="'$' + Number(podInfo.cost_per_hr).toFixed(2) + '/hr'"></span>
+          </template>
+          <a :href="podInfo.console_url" target="_blank" rel="noopener" style="margin-left: auto;">RunPod Console</a>
+        </div>
+      </template>
+
+      <!-- Status badge (when idle) -->
+      <template x-if="!isRunning && !hasPipelineData">
         <div class="status-banner">
           <template x-if="viewingRunId">
             <span class="status-badge done">Completed</span>
@@ -592,6 +685,12 @@
               <div class="stat-card">
                 <div class="stat-label">TBT p50 / p95</div>
                 <div class="stat-value" x-text="fmtNum(summaryData.tbt.p50) + ' / ' + fmtNum(summaryData.tbt.p95) + ' ms'"></div>
+              </div>
+            </template>
+            <template x-if="podInfo && podInfo.cost_per_hr != null && summaryData.total_duration_s">
+              <div class="stat-card">
+                <div class="stat-label">Pod Cost</div>
+                <div class="stat-value" x-text="'$' + (podInfo.cost_per_hr * summaryData.total_duration_s / 3600).toFixed(4)"></div>
               </div>
             </template>
           </div>
@@ -736,6 +835,9 @@ function dashboard() {
     selectedConfig: '',
     serverUrl: '',
     sidebarOpen: true,
+    configPreview: null,
+    configPreviewLoading: false,
+    configPreviewError: null,
 
     // Active experiment
     isRunning: false,
@@ -744,6 +846,7 @@ function dashboard() {
     currentPhase: '',
     experimentInfo: '',
     requestProgress: '',
+    hasPipelineData: false,
 
     // Data stores (keyed by run_id)
     runData: {},
@@ -763,6 +866,7 @@ function dashboard() {
     logs: [],
     logPaused: false,
     summaryData: null,
+    podInfo: null,
     pipelineSteps: [],
 
     // Session runs (completed)
@@ -783,6 +887,7 @@ function dashboard() {
       this.connectWs();
       this.fetchConfigs();
       this.initCharts();
+      this.$watch('selectedConfig', (val) => this.loadConfigPreview(val));
     },
 
     fmtNum(v) {
@@ -814,6 +919,9 @@ function dashboard() {
           break;
         case 'provisioning_done':
           byId('provision').status = 'completed';
+          if (data.cost_per_hr != null) {
+            byId('provision').detail = `$${Number(data.cost_per_hr).toFixed(2)}/hr`;
+          }
           break;
         case 'model_loading':
           if (byId('provision').status === 'pending') byId('provision').status = 'completed';
@@ -910,6 +1018,7 @@ function dashboard() {
       const phase = msg.phase;
       const data = msg.data || {};
 
+      this.hasPipelineData = true;
       this.updatePipeline(phase, data);
 
       switch (phase) {
@@ -923,6 +1032,15 @@ function dashboard() {
           break;
         case 'provisioning_done':
           this.currentPhase = 'Provisioned';
+          if (data.pod_id) {
+            this.podInfo = {
+              pod_id: data.pod_id,
+              gpu_type: data.gpu_type || null,
+              gpu_count: data.gpu_count || null,
+              cost_per_hr: data.cost_per_hr || null,
+              console_url: `https://www.runpod.io/console/pods/${data.pod_id}`,
+            };
+          }
           break;
         case 'model_loading':
           this.currentPhase = 'Loading model';
@@ -1027,6 +1145,26 @@ function dashboard() {
       }
     },
 
+    async loadConfigPreview(path) {
+      this.configPreview = null;
+      this.configPreviewError = null;
+      if (!path) return;
+      this.configPreviewLoading = true;
+      try {
+        const resp = await fetch(`/api/configs/preview?path=${encodeURIComponent(path)}`);
+        const data = await resp.json();
+        if (data.error) {
+          this.configPreviewError = data.error;
+        } else {
+          this.configPreview = data;
+        }
+      } catch (e) {
+        this.configPreviewError = 'Failed to load preview';
+      } finally {
+        this.configPreviewLoading = false;
+      }
+    },
+
     startExperiment() {
       if (!this.ws || !this.selectedConfig) return;
       // Reset live data
@@ -1065,9 +1203,11 @@ function dashboard() {
       this.totalCount = 0;
       this.logs = [];
       this.summaryData = null;
+      this.podInfo = null;
       this.currentPhase = '';
       this.experimentInfo = '';
       this.requestProgress = '';
+      this.hasPipelineData = false;
       this.pipelineSteps = this.freshPipeline();
       this.initCharts();
     },

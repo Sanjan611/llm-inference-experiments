@@ -112,6 +112,9 @@ class ExperimentManager:
         """Full experiment lifecycle with event broadcasting."""
         provider: RunPodProvider | None = None
         pod_id: str | None = None
+        gpu_type: str | None = None
+        gpu_count: int | None = None
+        cost_per_hr: float | None = None
         runner: Runner | None = None
         status = "completed"
         result_path: str | None = None
@@ -139,12 +142,18 @@ class ExperimentManager:
                 provider = RunPodProvider()
                 pod = provider.create(experiment)
                 pod_id = pod.pod_id
+                gpu_type = pod.gpu_type
+                gpu_count = pod.gpu_count
+                cost_per_hr = pod.cost_per_hr
                 base_url = pod.base_url
                 await self._broadcast_phase(
                     run_id,
                     "provisioning_done",
                     {
                         "pod_id": pod_id,
+                        "gpu_type": gpu_type,
+                        "gpu_count": gpu_count,
+                        "cost_per_hr": cost_per_hr,
                         "server_url": base_url,
                     },
                 )
@@ -208,6 +217,9 @@ class ExperimentManager:
                     base_url,
                     pod_id,
                     server_url,
+                    gpu_type=gpu_type,
+                    gpu_count=gpu_count,
+                    cost_per_hr=cost_per_hr,
                 )
                 if iter_result_path:
                     result_path = iter_result_path
@@ -255,6 +267,10 @@ class ExperimentManager:
         base_url: str,
         pod_id: str | None,
         server_url: str | None,
+        *,
+        gpu_type: str | None = None,
+        gpu_count: int | None = None,
+        cost_per_hr: float | None = None,
     ) -> str | None:
         """Execute a single benchmark iteration and return the result file path."""
         scraper: GpuMetricsScraper | None = None
@@ -366,6 +382,9 @@ class ExperimentManager:
                 finished_at=datetime.now(timezone.utc),
                 server_url=base_url,
                 pod_id=pod_id,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                cost_per_hr=cost_per_hr,
                 status="completed" if aggregated.failed_requests == 0 else "partial",
             )
 
@@ -409,6 +428,9 @@ class ExperimentManager:
                     finished_at=datetime.now(timezone.utc),
                     server_url=server_url,
                     pod_id=pod_id,
+                    gpu_type=gpu_type,
+                    gpu_count=gpu_count,
+                    cost_per_hr=cost_per_hr,
                     status="partial",
                 )
                 result_path = save_results(

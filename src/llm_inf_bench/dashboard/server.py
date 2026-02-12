@@ -9,7 +9,10 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import ValidationError
 
+from llm_inf_bench.config.loader import load_experiment
+from llm_inf_bench.config.validation import ConfigValidationError
 from llm_inf_bench.dashboard.experiment_manager import ExperimentManager
 from llm_inf_bench.dashboard.log_handler import WebSocketLogHandler
 from llm_inf_bench.dashboard.websocket import ConnectionManager
@@ -64,6 +67,33 @@ def create_app() -> FastAPI:
                     }
                 )
         return configs
+
+    @app.get("/api/configs/preview")
+    async def config_preview(path: str = "") -> JSONResponse:
+        """Parse a config file and return key parameters for preview."""
+        if not path:
+            return JSONResponse({"error": "path query parameter required"}, status_code=400)
+        try:
+            config = load_experiment(Path(path))
+        except (ConfigValidationError, ValidationError, FileNotFoundError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+
+        preview: dict[str, Any] = {
+            "name": config.name,
+            "description": config.description,
+            "framework": config.framework,
+            "model_name": config.model.name,
+            "quantization": config.model.quantization,
+            "gpu_type": config.infrastructure.gpu_type,
+            "gpu_count": config.infrastructure.gpu_count,
+            "workload_type": config.workload.type,
+            "request_count": config.workload.requests.count,
+            "max_tokens": config.workload.parameters.max_tokens,
+            "batch_size": config.workload.batch_size,
+            "concurrency": config.workload.concurrency,
+            "sweep": config.workload.sweep.model_dump() if config.workload.sweep else None,
+        }
+        return JSONResponse(preview)
 
     @app.get("/api/results")
     async def api_list_results(
