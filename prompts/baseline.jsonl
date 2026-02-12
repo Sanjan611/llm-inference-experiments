@@ -1,0 +1,25 @@
+{"messages": [{"role": "user", "content": "What is the capital of France?"}]}
+{"messages": [{"role": "user", "content": "How many planets are in our solar system?"}]}
+{"messages": [{"role": "user", "content": "What year did the first moon landing occur?"}]}
+{"messages": [{"role": "user", "content": "What is the speed of light in meters per second?"}]}
+{"messages": [{"role": "user", "content": "Who wrote the novel '1984'?"}]}
+{"messages": [{"role": "user", "content": "Explain how photosynthesis works in simple terms."}]}
+{"messages": [{"role": "user", "content": "Describe the difference between TCP and UDP protocols."}]}
+{"messages": [{"role": "user", "content": "Explain the concept of supply and demand in economics."}]}
+{"messages": [{"role": "user", "content": "How does a neural network learn from data?"}]}
+{"messages": [{"role": "user", "content": "What is the difference between a stack and a queue in computer science?"}]}
+{"messages": [{"role": "user", "content": "Write a short story about a robot discovering music for the first time."}]}
+{"messages": [{"role": "user", "content": "Write a haiku about the ocean at sunset."}]}
+{"messages": [{"role": "user", "content": "Compose a limerick about a programmer who loves debugging."}]}
+{"messages": [{"role": "user", "content": "Write a brief dialogue between a cat and a dog meeting for the first time."}]}
+{"messages": [{"role": "user", "content": "Describe an imaginary city floating in the clouds in three sentences."}]}
+{"messages": [{"role": "user", "content": "A farmer has 17 sheep. All but 9 run away. How many sheep does the farmer have left?"}]}
+{"messages": [{"role": "user", "content": "If a train travels at 60 mph for 2.5 hours, how far does it travel?"}]}
+{"messages": [{"role": "user", "content": "What are the pros and cons of remote work compared to office work?"}]}
+{"messages": [{"role": "user", "content": "Why do leaves change color in autumn? Walk through the biological process."}]}
+{"messages": [{"role": "user", "content": "Compare and contrast renewable and non-renewable energy sources."}]}
+{"messages": [{"role": "user", "content": "Write a Python function that checks if a string is a palindrome."}]}
+{"messages": [{"role": "user", "content": "Explain what a REST API is and give an example of a GET request."}]}
+{"messages": [{"role": "user", "content": "Write a SQL query to find the top 5 customers by total order value."}]}
+{"messages": [{"role": "user", "content": "What is the difference between a compiler and an interpreter?"}]}
+{"messages": [{"role": "user", "content": "Explain how Git branching works and when you would use a feature branch."}]}

@@ -1,0 +1,16 @@
+extends: "../base/sglang-defaults.yaml"
+
+name: "baseline-sglang-a100"
+description: "Baseline SGLang latency on A100-80GB"
+
+model:
+  name: "meta-llama/Meta-Llama-3-8B-Instruct"
+
+infrastructure:
+  gpu_type: "A100-80GB"
+
+workload:
+  type: "single"
+  requests:
+    source: "../../prompts/baseline.jsonl"
+    count: 50
