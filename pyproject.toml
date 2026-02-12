@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 prometheus = ["prometheus-client>=0.20"]
 analysis = ["pandas>=2.0", "matplotlib>=3.8"]
+dashboard = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "mypy>=1.10", "ruff>=0.5"]

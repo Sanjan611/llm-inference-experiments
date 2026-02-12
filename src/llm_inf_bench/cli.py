@@ -122,7 +122,11 @@ def results_show(
 
     # Metadata
     console.print("\n[bold]Metadata[/bold]")
-    for key in ("server_url", "pod_id", "started_at", "finished_at"):
+    metadata_keys = (
+        "server_url", "pod_id", "gpu_type", "gpu_count",
+        "cost_per_hr", "started_at", "finished_at",
+    )
+    for key in metadata_keys:
         val = result.metadata.get(key)
         if val:
             console.print(f"  {key}: {val}")
@@ -143,6 +147,25 @@ def results_compare(
         raise typer.Exit(1)
 
     print_comparison(result_a, result_b)
+
+
+@app.command()
+def dashboard(
+    port: int = typer.Option(8420, "--port", help="Port number for the dashboard server"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open browser"),
+) -> None:
+    """Launch the experiment dashboard with live metrics visualization."""
+    try:
+        from llm_inf_bench.dashboard.server import run_server
+    except ImportError:
+        console.print(
+            "[red]Dashboard dependencies not installed.[/red]\n"
+            "Install them with: [bold]uv sync --extra dashboard[/bold]"
+        )
+        raise typer.Exit(1)
+
+    console.print(f"Starting dashboard on [bold]http://localhost:{port}[/bold]")
+    run_server(port=port, open_browser=not no_browser)
 
 
 @app.command()
@@ -318,6 +341,9 @@ async def _execute_run(
     progress = BenchmarkProgress()
     provider: RunPodProvider | None = None
     pod_id: str | None = None
+    gpu_type: str | None = None
+    gpu_count: int | None = None
+    cost_per_hr: float | None = None
     runner: Runner | None = None
 
     try:
@@ -333,6 +359,9 @@ async def _execute_run(
             provider = RunPodProvider()
             pod = provider.create(experiment)
             pod_id = pod.pod_id
+            gpu_type = pod.gpu_type
+            gpu_count = pod.gpu_count
+            cost_per_hr = pod.cost_per_hr
             base_url = pod.base_url
             progress.phase_provisioning_done(pod_id, base_url)
 
@@ -360,6 +389,7 @@ async def _execute_run(
 
             await _execute_iteration(
                 variation, runner, progress, base_url, pod_id, server_url,
+                gpu_type=gpu_type, gpu_count=gpu_count, cost_per_hr=cost_per_hr,
             )
 
     finally:
@@ -387,6 +417,10 @@ async def _execute_iteration(
     base_url: str,
     pod_id: str | None,
     server_url: str | None,
+    *,
+    gpu_type: str | None = None,
+    gpu_count: int | None = None,
+    cost_per_hr: float | None = None,
 ) -> None:
     """Execute a single benchmark iteration (one sweep variation)."""
     scraper: GpuMetricsScraper | None = None
@@ -446,6 +480,9 @@ async def _execute_iteration(
             finished_at=datetime.now(timezone.utc),
             server_url=base_url,
             pod_id=pod_id,
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            cost_per_hr=cost_per_hr,
             status="completed" if aggregated.failed_requests == 0 else "partial",
         )
 
@@ -479,6 +516,9 @@ async def _execute_iteration(
                 finished_at=datetime.now(timezone.utc),
                 server_url=server_url,
                 pod_id=pod_id,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                cost_per_hr=cost_per_hr,
                 status="partial",
             )
             output_dir = experiment.metrics.output_dir

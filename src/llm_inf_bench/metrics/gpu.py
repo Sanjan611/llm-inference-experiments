@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -184,10 +185,12 @@ class GpuMetricsScraper:
         client: httpx.AsyncClient,
         framework: str,
         sample_interval_ms: int = 100,
+        on_sample: Callable[[GpuSample], None] | None = None,
     ) -> None:
         self._client = client
         self._framework = framework
         self._sample_interval_ms = sample_interval_ms
+        self._on_sample = on_sample
         self._metric_map = _METRIC_MAPS.get(framework, VLLM_METRIC_MAP)
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -220,6 +223,8 @@ class GpuMetricsScraper:
             try:
                 sample = await self._scrape_once()
                 self._time_series.samples.append(sample)
+                if self._on_sample is not None:
+                    self._on_sample(sample)
             except Exception:
                 self._time_series.scrape_errors += 1
                 logger.warning("GPU metrics scrape failed", exc_info=True)

@@ -98,3 +98,23 @@ class TestRunMetadata:
         )
         assert m.started_at == now
         assert m.status == "completed"
+
+    def test_gpu_fields_default_none(self):
+        m = RunMetadata(run_id="test-456", experiment_name="test")
+        assert m.gpu_type is None
+        assert m.gpu_count is None
+        assert m.cost_per_hr is None
+
+    def test_gpu_fields_set(self):
+        m = RunMetadata(
+            run_id="test-789",
+            experiment_name="gpu-run",
+            pod_id="pod-xyz",
+            gpu_type="A100-80GB",
+            gpu_count=2,
+            cost_per_hr=1.64,
+            status="completed",
+        )
+        assert m.gpu_type == "A100-80GB"
+        assert m.gpu_count == 2
+        assert m.cost_per_hr == 1.64

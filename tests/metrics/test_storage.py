@@ -153,6 +153,70 @@ def _write_result_file(directory, run_id, *, status="completed", started_at="202
     return fp
 
 
+class TestSaveResultsPodFields:
+    """Test that gpu_type, gpu_count, cost_per_hr are persisted in JSON output."""
+
+    def _make_config(self) -> ExperimentConfig:
+        return ExperimentConfig(
+            name="pod-test",
+            model={"name": "test-model"},
+            framework="vllm",
+            infrastructure={"gpu_type": "A100-80GB"},
+            workload={
+                "type": "single",
+                "requests": {"source": "prompts/test.jsonl", "count": 5},
+            },
+        )
+
+    def test_pod_fields_in_json(self, tmp_path):
+        config = self._make_config()
+        results = [RequestResult(request_index=0, ttft_ms=50.0, e2e_latency_ms=300.0)]
+        aggregated = aggregate_results(results, total_duration_s=1.0)
+        metadata = RunMetadata(
+            run_id="pod-run",
+            experiment_name="pod-test",
+            status="completed",
+            pod_id="pod-abc",
+            gpu_type="A100-80GB",
+            gpu_count=2,
+            cost_per_hr=1.64,
+        )
+
+        path = save_results(tmp_path, metadata, config, results, aggregated)
+        data = json.loads(path.read_text())
+
+        assert data["metadata"]["gpu_type"] == "A100-80GB"
+        assert data["metadata"]["gpu_count"] == 2
+        assert data["metadata"]["cost_per_hr"] == 1.64
+        assert data["metadata"]["pod_id"] == "pod-abc"
+
+    def test_pod_fields_none_when_unset(self, tmp_path):
+        config = self._make_config()
+        results = [RequestResult(request_index=0)]
+        aggregated = aggregate_results(results, total_duration_s=1.0)
+        metadata = RunMetadata(
+            run_id="no-pod",
+            experiment_name="pod-test",
+            status="completed",
+        )
+
+        path = save_results(tmp_path, metadata, config, results, aggregated)
+        data = json.loads(path.read_text())
+
+        assert data["metadata"]["gpu_type"] is None
+        assert data["metadata"]["gpu_count"] is None
+        assert data["metadata"]["cost_per_hr"] is None
+
+    def test_backward_compat_load_without_pod_fields(self, tmp_path):
+        """Old result files without gpu_type/gpu_count/cost_per_hr still load fine."""
+        _write_result_file(tmp_path, "old-run")
+        result = load_result(tmp_path, "old-run")
+        # These fields aren't in the old file, but .get() returns None
+        assert result.metadata.get("gpu_type") is None
+        assert result.metadata.get("gpu_count") is None
+        assert result.metadata.get("cost_per_hr") is None
+
+
 class TestListResults:
     def test_empty_dir(self, tmp_path):
         results = list_results(tmp_path)

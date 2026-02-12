@@ -51,4 +51,7 @@ class RunMetadata:
     finished_at: datetime | None = None
     server_url: str | None = None
     pod_id: str | None = None
+    gpu_type: str | None = None
+    gpu_count: int | None = None
+    cost_per_hr: float | None = None
     status: str = "pending"
