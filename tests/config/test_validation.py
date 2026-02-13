@@ -109,6 +109,34 @@ class TestWorkloadTypeValidation:
         )
         assert validate_experiment(config) == []
 
+    def test_multi_turn_user_messages_insufficient(self):
+        config = _make_config(
+            workload={
+                "type": "multi_turn",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "conversation": {
+                    "turns": 5,
+                    "user_messages": ["A", "B"],  # need 4
+                },
+            }
+        )
+        errors = validate_experiment(config)
+        assert any("user_messages" in e for e in errors)
+        assert any("at least 4" in e for e in errors)
+
+    def test_multi_turn_user_messages_sufficient(self):
+        config = _make_config(
+            workload={
+                "type": "multi_turn",
+                "requests": {"source": "test.jsonl", "count": 10},
+                "conversation": {
+                    "turns": 3,
+                    "user_messages": ["A", "B"],
+                },
+            }
+        )
+        assert validate_experiment(config) == []
+
     def test_single_workload_passes(self):
         config = _make_config()
         assert validate_experiment(config) == []

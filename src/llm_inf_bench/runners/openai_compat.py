@@ -87,9 +87,7 @@ class OpenAICompatibleRunner(Runner):
             except httpx.RemoteProtocolError as e:
                 last_error = f"protocol error: {e}"
 
-            logger.debug(
-                "Health check attempt at %.1fs: %s", elapsed, last_error
-            )
+            logger.debug("Health check attempt at %.1fs: %s", elapsed, last_error)
             await asyncio.sleep(interval)
 
     async def chat_completion(
@@ -138,18 +136,15 @@ class OpenAICompatibleRunner(Runner):
         }
 
         content_timestamps: list[float] = []
+        content_parts: list[str] = []
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
         content_chunk_count = 0
 
-        async with self._client.stream(
-            "POST", "/v1/chat/completions", json=payload
-        ) as resp:
+        async with self._client.stream("POST", "/v1/chat/completions", json=payload) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()
-                raise RunnerError(
-                    f"HTTP {resp.status_code}: {body.decode(errors='replace')}"
-                )
+                raise RunnerError(f"HTTP {resp.status_code}: {body.decode(errors='replace')}")
 
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
@@ -178,6 +173,7 @@ class OpenAICompatibleRunner(Runner):
                 content = delta.get("content")
                 if content:
                     content_timestamps.append(time.perf_counter())
+                    content_parts.append(content)
                     content_chunk_count += 1
 
         t_end = time.perf_counter()
@@ -205,6 +201,7 @@ class OpenAICompatibleRunner(Runner):
             completion_tokens=completion_tokens,
             started_at=started_at,
             finished_at=datetime.now(timezone.utc),
+            completion_text="".join(content_parts) if content_parts else None,
         )
 
     async def close(self) -> None:

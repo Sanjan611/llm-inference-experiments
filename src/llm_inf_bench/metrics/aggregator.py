@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from llm_inf_bench.metrics.collector import RequestResult
@@ -106,4 +106,91 @@ def aggregate_results(
         ttft=compute_percentiles(ttft_values),
         e2e_latency=compute_percentiles(e2e_values),
         tbt=compute_percentiles(tbt_values),
+    )
+
+
+@dataclass
+class TurnStats:
+    """Per-turn aggregated statistics."""
+
+    turn_index: int
+    request_count: int
+    successful: int
+    failed: int
+    avg_prompt_tokens: float
+    avg_completion_tokens: float
+    ttft: PercentileStats | None
+    e2e_latency: PercentileStats | None
+    tbt: PercentileStats | None
+
+
+@dataclass
+class MultiTurnAggregatedMetrics:
+    """Summary statistics for a multi-turn benchmark run."""
+
+    overall: AggregatedMetrics
+    per_turn: list[TurnStats] = field(default_factory=list)
+    total_conversations: int = 0
+    turns_per_conversation: int = 0
+
+
+def aggregate_multi_turn_results(
+    results: list[RequestResult],
+    total_duration_s: float,
+    turns: int,
+) -> MultiTurnAggregatedMetrics:
+    """Aggregate multi-turn results with per-turn breakdown.
+
+    Groups results by ``turn_index`` and computes per-turn statistics
+    in addition to the overall aggregate.
+    """
+    overall = aggregate_results(results, total_duration_s)
+
+    # Group by turn_index
+    by_turn: dict[int, list[RequestResult]] = {}
+    for r in results:
+        t = r.turn_index if r.turn_index is not None else 0
+        by_turn.setdefault(t, []).append(r)
+
+    per_turn: list[TurnStats] = []
+    for turn_idx in range(turns):
+        turn_results = by_turn.get(turn_idx, [])
+        successful = [r for r in turn_results if r.error is None]
+        failed = [r for r in turn_results if r.error is not None]
+
+        ttft_values = [r.ttft_ms for r in successful if r.ttft_ms is not None]
+        e2e_values = [r.e2e_latency_ms for r in successful if r.e2e_latency_ms is not None]
+        tbt_values: list[float] = []
+        for r in successful:
+            tbt_values.extend(r.inter_token_latencies_ms)
+
+        prompt_toks = [r.prompt_tokens for r in successful if r.prompt_tokens is not None]
+        compl_toks = [r.completion_tokens for r in successful if r.completion_tokens is not None]
+
+        avg_prompt = sum(prompt_toks) / len(prompt_toks) if prompt_toks else 0.0
+        avg_compl = sum(compl_toks) / len(compl_toks) if compl_toks else 0.0
+
+        per_turn.append(
+            TurnStats(
+                turn_index=turn_idx,
+                request_count=len(turn_results),
+                successful=len(successful),
+                failed=len(failed),
+                avg_prompt_tokens=avg_prompt,
+                avg_completion_tokens=avg_compl,
+                ttft=compute_percentiles(ttft_values),
+                e2e_latency=compute_percentiles(e2e_values),
+                tbt=compute_percentiles(tbt_values),
+            )
+        )
+
+    # Determine conversation count from results
+    conv_indices = {r.conversation_index for r in results if r.conversation_index is not None}
+    total_conversations = len(conv_indices) if conv_indices else 0
+
+    return MultiTurnAggregatedMetrics(
+        overall=overall,
+        per_turn=per_turn,
+        total_conversations=total_conversations,
+        turns_per_conversation=turns,
     )

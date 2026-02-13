@@ -7,9 +7,11 @@ import pytest
 from llm_inf_bench.workloads import (
     BatchWorkload,
     ConcurrentWorkload,
+    MultiTurnWorkload,
     SingleWorkload,
     create_workload,
 )
+from llm_inf_bench.workloads.multi_turn import ConversationScript
 
 
 def _make_prompts(n: int = 4) -> list[list[dict[str, str]]]:
@@ -52,6 +54,38 @@ class TestCreateWorkload:
         assert isinstance(wl, SingleWorkload)
         assert wl._max_tokens == 512
         assert wl._temperature == 0.3
+
+    def test_creates_multi_turn(self):
+        conversations = [
+            ConversationScript(
+                initial_messages=[{"role": "user", "content": "Hi"}],
+                follow_up_messages=["Q2"],
+            )
+        ]
+        wl = create_workload(
+            "multi_turn", _make_prompts(), model="test",
+            conversations=conversations, conversation_turns=2,
+        )
+        assert isinstance(wl, MultiTurnWorkload)
+
+    def test_multi_turn_without_conversations_raises(self):
+        with pytest.raises(ValueError, match="conversations"):
+            create_workload(
+                "multi_turn", _make_prompts(), model="test",
+                conversation_turns=2,
+            )
+
+    def test_multi_turn_without_turns_raises(self):
+        conversations = [
+            ConversationScript(
+                initial_messages=[{"role": "user", "content": "Hi"}],
+            )
+        ]
+        with pytest.raises(ValueError, match="conversation_turns"):
+            create_workload(
+                "multi_turn", _make_prompts(), model="test",
+                conversations=conversations,
+            )
 
     def test_passes_callback(self):
         from unittest.mock import MagicMock

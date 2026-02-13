@@ -1,0 +1,33 @@
+extends: "../base/vllm-defaults.yaml"
+
+name: "multi-turn-conversation-vllm"
+description: "Multi-turn conversation workload — measures TTFT scaling, prefix caching, and KV cache pressure across turns"
+
+model:
+  name: "Qwen/Qwen3-0.6B"
+
+infrastructure:
+  gpu_type: "RTX 4000 Ada"
+  gpu_count: 1
+
+workload:
+  type: "multi_turn"
+  requests:
+    source: "../../prompts/multi-turn/conversations.jsonl"
+    count: 10
+  parameters:
+    max_tokens: 256
+    temperature: 0.7
+  conversation:
+    turns: 10
+    system_prompt: "You are a knowledgeable and thoughtful assistant. Provide clear, detailed explanations with concrete examples when relevant. When asked follow-up questions, build on your previous answers rather than repeating yourself."
+    user_messages:
+      - "Can you elaborate on that?"
+      - "Give me a specific example."
+      - "What are the most common misconceptions about this?"
+      - "How does this relate to everyday life?"
+      - "What are the key differences compared to similar concepts?"
+      - "Can you walk me through the underlying mechanism step by step?"
+      - "What recent developments have changed our understanding of this?"
+      - "What are the practical applications?"
+      - "If you had to explain this to a five-year-old, how would you?"

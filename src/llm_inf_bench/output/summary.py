@@ -8,7 +8,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from llm_inf_bench.metrics.aggregator import AggregatedMetrics, PercentileStats
+from llm_inf_bench.metrics.aggregator import (
+    AggregatedMetrics,
+    MultiTurnAggregatedMetrics,
+    PercentileStats,
+)
 
 if TYPE_CHECKING:
     from llm_inf_bench.metrics.gpu import GpuSummary
@@ -67,6 +71,40 @@ def print_summary(metrics: AggregatedMetrics) -> None:
     console.print(panel)
 
 
+def print_turn_breakdown(metrics: MultiTurnAggregatedMetrics) -> None:
+    """Render a per-turn breakdown table for multi-turn workloads."""
+    if not metrics.per_turn:
+        return
+
+    convs = metrics.total_conversations
+    tpc = metrics.turns_per_conversation
+    table = Table(
+        title=f"Turn Breakdown ({convs} conversations x {tpc} turns)",
+        expand=False,
+    )
+    table.add_column("Turn", style="bold", justify="right")
+    table.add_column("Avg Prompt Tok", justify="right")
+    table.add_column("TTFT p50", justify="right")
+    table.add_column("TTFT p95", justify="right")
+    table.add_column("Latency p50", justify="right")
+    table.add_column("Success", justify="right")
+
+    for ts in metrics.per_turn:
+        ttft_p50 = f"{ts.ttft.p50:.0f}ms" if ts.ttft else "n/a"
+        ttft_p95 = f"{ts.ttft.p95:.0f}ms" if ts.ttft else "n/a"
+        lat_p50 = f"{ts.e2e_latency.p50:.0f}ms" if ts.e2e_latency else "n/a"
+        table.add_row(
+            str(ts.turn_index + 1),
+            f"{ts.avg_prompt_tokens:.0f}",
+            ttft_p50,
+            ttft_p95,
+            lat_p50,
+            f"{ts.successful}/{ts.request_count}",
+        )
+
+    console.print(table)
+
+
 # ---------------------------------------------------------------------------
 # Comparison
 # ---------------------------------------------------------------------------
@@ -110,12 +148,14 @@ def _percentile_rows(
         va = getattr(stats_a, pname, None) if stats_a else None
         vb = getattr(stats_b, pname, None) if stats_b else None
         delta = _fmt_delta(va, vb) if va is not None and vb is not None else ""
-        rows.append((
-            f"  {label} {pname}",
-            _safe_fmt(va, "ms"),
-            _safe_fmt(vb, "ms"),
-            delta,
-        ))
+        rows.append(
+            (
+                f"  {label} {pname}",
+                _safe_fmt(va, "ms"),
+                _safe_fmt(vb, "ms"),
+                delta,
+            )
+        )
     return rows
 
 
@@ -206,7 +246,9 @@ def print_comparison(result_a: StoredResult, result_b: StoredResult) -> None:
         kv_b = _gpu_val(gb, "kv_cache_usage_peak")
         kv_a_pct = kv_a * 100 if kv_a is not None else None
         kv_b_pct = kv_b * 100 if kv_b is not None else None
-        delta = _fmt_delta(kv_a_pct, kv_b_pct) if kv_a_pct is not None and kv_b_pct is not None else ""
+        delta = (
+            _fmt_delta(kv_a_pct, kv_b_pct) if kv_a_pct is not None and kv_b_pct is not None else ""
+        )
         table.add_row(
             "KV Cache (peak)",
             _safe_fmt(kv_a_pct, "%"),

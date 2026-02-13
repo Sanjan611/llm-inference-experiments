@@ -19,7 +19,7 @@ from llm_inf_bench.config.loader import APP_CONFIG_DIR, APP_CONFIG_PATH, load_ex
 from llm_inf_bench.config.schema import AppConfig, ExperimentConfig
 from llm_inf_bench.config.sweep import expand_sweep
 from llm_inf_bench.config.validation import ConfigValidationError
-from llm_inf_bench.metrics.aggregator import aggregate_results
+from llm_inf_bench.metrics.aggregator import aggregate_multi_turn_results, aggregate_results
 from llm_inf_bench.metrics.collector import RequestResult, RunMetadata
 from llm_inf_bench.metrics.gpu import GpuMetricsScraper, GpuTimeSeries
 from llm_inf_bench.metrics.storage import (
@@ -35,7 +35,7 @@ from llm_inf_bench.providers.runpod.client import RunPodProvider
 from llm_inf_bench.providers.runpod.pricing import check_pricing_staleness, estimate_cost
 from llm_inf_bench.runners import Runner, create_runner
 from llm_inf_bench.runners.base import HealthCheckTimeout
-from llm_inf_bench.workloads import create_workload, load_prompts
+from llm_inf_bench.workloads import create_workload, load_multi_turn_prompts, load_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +123,13 @@ def results_show(
     # Metadata
     console.print("\n[bold]Metadata[/bold]")
     metadata_keys = (
-        "server_url", "pod_id", "gpu_type", "gpu_count",
-        "cost_per_hr", "started_at", "finished_at",
+        "server_url",
+        "pod_id",
+        "gpu_type",
+        "gpu_count",
+        "cost_per_hr",
+        "started_at",
+        "finished_at",
     )
     for key in metadata_keys:
         val = result.metadata.get(key)
@@ -199,8 +204,7 @@ def doctor() -> None:
         console.print(f"[green]OK[/green]   Python {py_ver.major}.{py_ver.minor}.{py_ver.micro}")
     else:
         console.print(
-            f"[red]FAIL[/red] Python {py_ver.major}.{py_ver.minor}.{py_ver.micro} "
-            f"(need >= 3.10)"
+            f"[red]FAIL[/red] Python {py_ver.major}.{py_ver.minor}.{py_ver.micro} (need >= 3.10)"
         )
         all_ok = False
 
@@ -275,9 +279,18 @@ def run(
     if experiment.model.quantization:
         table.add_row("Quantization", experiment.model.quantization)
     table.add_row("Framework", experiment.framework)
-    table.add_row("GPU", f"{experiment.infrastructure.gpu_type} x{experiment.infrastructure.gpu_count}")
+    table.add_row(
+        "GPU", f"{experiment.infrastructure.gpu_type} x{experiment.infrastructure.gpu_count}"
+    )
     table.add_row("Workload", experiment.workload.type)
-    table.add_row("Requests", str(experiment.workload.requests.count))
+    if experiment.workload.type == "multi_turn" and experiment.workload.conversation:
+        conv = experiment.workload.conversation
+        total = experiment.workload.requests.count * conv.turns
+        table.add_row("Conversations", str(experiment.workload.requests.count))
+        table.add_row("Turns", str(conv.turns))
+        table.add_row("Total requests", str(total))
+    else:
+        table.add_row("Requests", str(experiment.workload.requests.count))
     if experiment.workload.batch_size is not None:
         table.add_row("Batch size", str(experiment.workload.batch_size))
     if experiment.workload.concurrency is not None:
@@ -290,17 +303,15 @@ def run(
         if experiment.workload.sweep:
             parts: list[str] = []
             if experiment.workload.sweep.concurrency:
-                parts.append(
-                    f"concurrency={experiment.workload.sweep.concurrency}"
-                )
+                parts.append(f"concurrency={experiment.workload.sweep.concurrency}")
             if experiment.workload.sweep.batch_size:
-                parts.append(
-                    f"batch_size={experiment.workload.sweep.batch_size}"
-                )
+                parts.append(f"batch_size={experiment.workload.sweep.batch_size}")
             sweep_desc += f" ({', '.join(parts)})"
         table.add_row("Sweep", sweep_desc)
 
-    cost = estimate_cost(experiment.infrastructure.gpu_type, experiment.infrastructure.gpu_count, 60)
+    cost = estimate_cost(
+        experiment.infrastructure.gpu_type, experiment.infrastructure.gpu_count, 60
+    )
     if cost is not None:
         table.add_row("Est. cost", f"${cost:.2f}/hr (community)")
 
@@ -325,9 +336,7 @@ def run(
             raise typer.Exit(0)
 
     try:
-        asyncio.run(
-            _execute_run(experiment, server_url=server_url)
-        )
+        asyncio.run(_execute_run(experiment, server_url=server_url))
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         raise typer.Exit(1)
@@ -388,8 +397,15 @@ async def _execute_run(
                 progress.reset_progress()
 
             await _execute_iteration(
-                variation, runner, progress, base_url, pod_id, server_url,
-                gpu_type=gpu_type, gpu_count=gpu_count, cost_per_hr=cost_per_hr,
+                variation,
+                runner,
+                progress,
+                base_url,
+                pod_id,
+                server_url,
+                gpu_type=gpu_type,
+                gpu_count=gpu_count,
+                cost_per_hr=cost_per_hr,
             )
 
     finally:
@@ -440,10 +456,26 @@ async def _execute_iteration(
             scraper.start()
 
         # Execution
-        prompts = load_prompts(
-            experiment.workload.requests.source,
-            experiment.workload.requests.count,
-        )
+        conversations = None
+        conversation_turns = None
+        if experiment.workload.type == "multi_turn":
+            conv = experiment.workload.conversation
+            assert conv is not None  # validated earlier
+            conversations = load_multi_turn_prompts(
+                source=experiment.workload.requests.source,
+                count=experiment.workload.requests.count,
+                turns=conv.turns,
+                system_prompt=conv.system_prompt,
+                user_messages=conv.user_messages,
+                shared_prefix=conv.shared_prefix,
+            )
+            conversation_turns = conv.turns
+            prompts = []  # not used for multi_turn
+        else:
+            prompts = load_prompts(
+                experiment.workload.requests.source,
+                experiment.workload.requests.count,
+            )
         workload = create_workload(
             workload_type=experiment.workload.type,
             prompts=prompts,
@@ -453,6 +485,8 @@ async def _execute_iteration(
             on_request_complete=progress.on_request_complete,
             batch_size=experiment.workload.batch_size,
             concurrency=experiment.workload.concurrency,
+            conversations=conversations,
+            conversation_turns=conversation_turns,
         )
 
         rich_progress = progress.phase_execution_start(
@@ -468,7 +502,18 @@ async def _execute_iteration(
             gpu_time_series = await scraper.stop()
 
         # Aggregate, save, summarize
-        aggregated = aggregate_results(results, total_duration_s=exec_duration)
+        multi_turn_metrics = None
+        if experiment.workload.type == "multi_turn":
+            conv = experiment.workload.conversation
+            assert conv is not None
+            multi_turn_metrics = aggregate_multi_turn_results(
+                results,
+                total_duration_s=exec_duration,
+                turns=conv.turns,
+            )
+            aggregated = multi_turn_metrics.overall
+        else:
+            aggregated = aggregate_results(results, total_duration_s=exec_duration)
         if gpu_time_series is not None:
             aggregated.gpu_summary = GpuMetricsScraper.summarize(gpu_time_series)
 
@@ -488,11 +533,19 @@ async def _execute_iteration(
 
         output_dir = experiment.metrics.output_dir
         result_path = save_results(
-            output_dir, metadata, experiment, results, aggregated,
+            output_dir,
+            metadata,
+            experiment,
+            results,
+            aggregated,
             gpu_time_series=gpu_time_series,
         )
         console.print(f"\n[green]Results saved:[/green] {result_path}")
         print_summary(aggregated)
+        if multi_turn_metrics is not None:
+            from llm_inf_bench.output.summary import print_turn_breakdown
+
+            print_turn_breakdown(multi_turn_metrics)
 
     except KeyboardInterrupt:
         # Stop scraper (best-effort)
@@ -523,7 +576,11 @@ async def _execute_iteration(
             )
             output_dir = experiment.metrics.output_dir
             result_path = save_results(
-                output_dir, metadata, experiment, results, aggregated,
+                output_dir,
+                metadata,
+                experiment,
+                results,
+                aggregated,
                 gpu_time_series=gpu_time_series,
             )
             console.print(f"\n[yellow]Partial results saved:[/yellow] {result_path}")

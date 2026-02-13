@@ -24,6 +24,7 @@ from llm_inf_bench.providers.runpod.client import RunPodProvider
 from llm_inf_bench.runners import Runner, create_runner
 from llm_inf_bench.runners.base import HealthCheckTimeout
 from llm_inf_bench.workloads import create_workload, load_prompts
+from llm_inf_bench.workloads.multi_turn import load_multi_turn_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -346,10 +347,26 @@ class ExperimentManager:
                 scraper.start()
 
             # Execute workload
-            prompts = load_prompts(
-                experiment.workload.requests.source,
-                experiment.workload.requests.count,
-            )
+            conversations = None
+            conversation_turns = None
+            if experiment.workload.type == "multi_turn":
+                conv = experiment.workload.conversation
+                assert conv is not None  # validated earlier
+                conversations = load_multi_turn_prompts(
+                    source=experiment.workload.requests.source,
+                    count=experiment.workload.requests.count,
+                    turns=conv.turns,
+                    system_prompt=conv.system_prompt,
+                    user_messages=conv.user_messages,
+                    shared_prefix=conv.shared_prefix,
+                )
+                conversation_turns = conv.turns
+                prompts = []  # not used for multi_turn
+            else:
+                prompts = load_prompts(
+                    experiment.workload.requests.source,
+                    experiment.workload.requests.count,
+                )
             workload = create_workload(
                 workload_type=experiment.workload.type,
                 prompts=prompts,
@@ -359,6 +376,8 @@ class ExperimentManager:
                 on_request_complete=on_request_complete,
                 batch_size=experiment.workload.batch_size,
                 concurrency=experiment.workload.concurrency,
+                conversations=conversations,
+                conversation_turns=conversation_turns,
             )
 
             exec_start = time.monotonic()

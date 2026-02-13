@@ -68,7 +68,10 @@ def save_results(
             "cost_per_hr": metadata.cost_per_hr,
         },
         "summary": dataclasses.asdict(aggregated),
-        "requests": [dataclasses.asdict(r) for r in results],
+        "requests": [
+            {k: v for k, v in dataclasses.asdict(r).items() if k != "completion_text"}
+            for r in results
+        ],
     }
 
     if gpu_time_series is not None:
@@ -171,14 +174,10 @@ def load_result(output_dir: str | Path, run_id: str) -> StoredResult:
     # Partial / prefix match
     matches = list(out_path.glob(f"*{run_id}*.json"))
     if len(matches) == 0:
-        raise FileNotFoundError(
-            f"No result found for {run_id!r} in {out_path}"
-        )
+        raise FileNotFoundError(f"No result found for {run_id!r} in {out_path}")
     if len(matches) > 1:
         ids = [m.stem for m in matches]
-        raise ValueError(
-            f"Ambiguous run ID {run_id!r} — matches: {', '.join(ids)}"
-        )
+        raise ValueError(f"Ambiguous run ID {run_id!r} — matches: {', '.join(ids)}")
 
     fp = matches[0]
     data = json.loads(fp.read_text())

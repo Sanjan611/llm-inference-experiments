@@ -8,14 +8,22 @@ from llm_inf_bench.metrics.collector import RequestResult
 from llm_inf_bench.workloads.base import Workload
 from llm_inf_bench.workloads.batch import BatchWorkload
 from llm_inf_bench.workloads.concurrent import ConcurrentWorkload
+from llm_inf_bench.workloads.multi_turn import (
+    ConversationScript,
+    MultiTurnWorkload,
+    load_multi_turn_prompts,
+)
 from llm_inf_bench.workloads.single import SingleWorkload, load_prompts
 
 __all__ = [
     "BatchWorkload",
     "ConcurrentWorkload",
+    "ConversationScript",
+    "MultiTurnWorkload",
     "SingleWorkload",
     "Workload",
     "create_workload",
+    "load_multi_turn_prompts",
     "load_prompts",
 ]
 
@@ -29,6 +37,8 @@ def create_workload(
     on_request_complete: Callable[[RequestResult], None] | None = None,
     batch_size: int | None = None,
     concurrency: int | None = None,
+    conversations: list[ConversationScript] | None = None,
+    conversation_turns: int | None = None,
 ) -> Workload:
     """Instantiate the appropriate workload for *workload_type*.
 
@@ -67,7 +77,19 @@ def create_workload(
             on_request_complete=on_request_complete,
         )
 
-    supported = "single, batch, concurrent"
-    raise ValueError(
-        f"Unknown workload type {workload_type!r}. Supported: {supported}"
-    )
+    if workload_type == "multi_turn":
+        if conversations is None:
+            raise ValueError("Workload type 'multi_turn' requires 'conversations'")
+        if conversation_turns is None:
+            raise ValueError("Workload type 'multi_turn' requires 'conversation_turns'")
+        return MultiTurnWorkload(
+            conversations=conversations,
+            turns=conversation_turns,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            on_request_complete=on_request_complete,
+        )
+
+    supported = "single, batch, concurrent, multi_turn"
+    raise ValueError(f"Unknown workload type {workload_type!r}. Supported: {supported}")

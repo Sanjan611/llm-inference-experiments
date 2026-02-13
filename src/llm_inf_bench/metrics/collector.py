@@ -19,6 +19,9 @@ class RequestResult:
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    turn_index: int | None = None
+    conversation_index: int | None = None
+    completion_text: str | None = None
 
     @property
     def tbt_ms(self) -> float | None:
