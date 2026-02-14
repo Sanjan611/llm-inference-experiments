@@ -222,6 +222,20 @@ class GpuMetricsScraper:
             self._time_series.total_scrapes += 1
             try:
                 sample = await self._scrape_once()
+                # Derive throughput from counter deltas when not natively available
+                if (
+                    sample.generation_throughput is None
+                    and sample.generation_tokens_total is not None
+                    and self._time_series.samples
+                ):
+                    prev = self._time_series.samples[-1]
+                    if prev.generation_tokens_total is not None:
+                        dt = sample.timestamp - prev.timestamp
+                        if dt > 0:
+                            sample.generation_throughput = (
+                                sample.generation_tokens_total
+                                - prev.generation_tokens_total
+                            ) / dt
                 self._time_series.samples.append(sample)
                 if self._on_sample is not None:
                     self._on_sample(sample)

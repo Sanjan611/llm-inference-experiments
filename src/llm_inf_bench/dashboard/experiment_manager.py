@@ -72,12 +72,15 @@ class ExperimentManager:
         self,
         config_path: str,
         server_url: str | None = None,
+        run_name: str | None = None,
     ) -> str:
         """Start an experiment. Returns the run_id. Raises if one is already running."""
         if self._active is not None:
             raise RuntimeError("An experiment is already running")
 
         experiment = load_experiment(Path(config_path))
+        if run_name:
+            experiment.name = run_name
         run_id = generate_run_id(experiment.name)
 
         self._cancel_event.clear()

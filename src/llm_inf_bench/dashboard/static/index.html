@@ -520,6 +520,8 @@
         </div>
       </template>
 
+      <label>Run Name (optional)</label>
+      <input type="text" x-model="runName" placeholder="Custom name..." style="margin-bottom: 10px;">
       <label>Server URL (optional)</label>
       <input type="text" x-model="serverUrl" placeholder="https://..." style="margin-bottom: 10px;">
       <template x-if="!isRunning">
@@ -834,6 +836,7 @@ function dashboard() {
     configs: [],
     selectedConfig: '',
     serverUrl: '',
+    runName: '',
     sidebarOpen: true,
     configPreview: null,
     configPreviewLoading: false,
@@ -1173,6 +1176,7 @@ function dashboard() {
         type: 'start_experiment',
         config_path: this.selectedConfig,
         server_url: this.serverUrl || null,
+        run_name: this.runName || null,
       }));
     },
 
@@ -1224,7 +1228,7 @@ function dashboard() {
         line: { color: '#6c5ce7', width: 1.5 },
       }], {
         ...layout,
-        yaxis: { ...layout.yaxis, title: '%', range: [0, 100] },
+        yaxis: { ...layout.yaxis, title: '%', rangemode: 'tozero' },
         xaxis: { ...layout.xaxis, title: 'Time (s)' },
       }, CHART_CONFIG);
 
@@ -1395,7 +1399,7 @@ function dashboard() {
         line: { color: '#6c5ce7', width: 1.5 },
       }], {
         ...layout,
-        yaxis: { ...layout.yaxis, title: '%', range: [0, 100] },
+        yaxis: { ...layout.yaxis, title: '%', rangemode: 'tozero' },
         xaxis: { ...layout.xaxis, title: 'Time (s)' },
       }, CHART_CONFIG);
 
@@ -1462,7 +1466,7 @@ function dashboard() {
       Plotly.newPlot('compare-kv', [
         { x: a.ts, y: a.kv, type: 'scatter', mode: 'lines', name: 'A', line: { color: '#6c5ce7', width: 1.5 } },
         { x: b.ts, y: b.kv, type: 'scatter', mode: 'lines', name: 'B', line: { color: '#00b894', width: 1.5 } },
-      ], { ...layout, yaxis: { ...layout.yaxis, title: '%', range: [0, 100] } }, CHART_CONFIG);
+      ], { ...layout, yaxis: { ...layout.yaxis, title: '%', rangemode: 'tozero' } }, CHART_CONFIG);
 
       // Active requests
       Plotly.newPlot('compare-reqs', [

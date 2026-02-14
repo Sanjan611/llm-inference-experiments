@@ -247,6 +247,9 @@ def run(
     server_url: str | None = typer.Option(
         None, "--server-url", help="Use existing server instead of provisioning"
     ),
+    name: str | None = typer.Option(
+        None, "--name", "-n", help="Custom run name (overrides config name in run ID)"
+    ),
 ) -> None:
     """Run a benchmark experiment."""
     # Load and validate config
@@ -270,11 +273,18 @@ def run(
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
 
+    # Apply custom name override
+    config_name = experiment.name
+    if name is not None:
+        experiment.name = name
+
     # Display summary
     table = Table(title=f"Experiment: {experiment.name}")
     table.add_column("Setting", style="bold")
     table.add_column("Value")
 
+    if name is not None:
+        table.add_row("Config", config_name)
     table.add_row("Model", experiment.model.name)
     if experiment.model.quantization:
         table.add_row("Quantization", experiment.model.quantization)

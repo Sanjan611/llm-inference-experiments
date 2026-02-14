@@ -221,9 +221,13 @@ class TestGpuMetricsScraper:
         assert sample.generation_tokens_total == 200.0
         assert sample.prefix_cache_hits_total == 10.0
         assert sample.prefix_cache_queries_total == 20.0
-        # vLLM doesn't expose these as native gauges
+        # First sample has no previous sample to diff, so no computed throughput
         assert sample.generation_throughput is None
         assert sample.prefix_cache_hit_rate is None
+
+        # Subsequent samples should have throughput computed from counter deltas
+        if len(ts.samples) > 1:
+            assert ts.samples[1].generation_throughput is not None
 
     @pytest.mark.asyncio
     async def test_sglang_extraction(self):
@@ -259,6 +263,56 @@ class TestGpuMetricsScraper:
         # Stop immediately — should not hang
         ts = await scraper.stop()
         assert isinstance(ts, GpuTimeSeries)
+
+    @pytest.mark.asyncio
+    async def test_vllm_throughput_computed_from_deltas(self):
+        """Second+ vLLM samples should have throughput derived from counter deltas."""
+        # Use varying generation_tokens_total to produce a meaningful delta
+        call_count = 0
+        base_tokens = 200
+
+        def make_response() -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            tokens = base_tokens + (call_count - 1) * 100
+            text = (
+                f"vllm:kv_cache_usage_perc 0.1\n"
+                f"vllm:generation_tokens_total {tokens}\n"
+            )
+            resp = MagicMock(spec=httpx.Response)
+            resp.text = text
+            resp.status_code = 200
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get = AsyncMock(side_effect=lambda *a, **kw: make_response())
+
+        scraper = GpuMetricsScraper(client, "vllm", sample_interval_ms=50)
+        scraper.start()
+        await asyncio.sleep(0.2)  # Allow several scrapes
+        ts = await scraper.stop()
+
+        assert len(ts.samples) >= 2, f"Expected >=2 samples, got {len(ts.samples)}"
+        # First sample: no previous → no throughput
+        assert ts.samples[0].generation_throughput is None
+        # Second+ samples: throughput computed from counter deltas
+        for s in ts.samples[1:]:
+            assert s.generation_throughput is not None
+            assert s.generation_throughput > 0
+
+    @pytest.mark.asyncio
+    async def test_sglang_native_throughput_not_overridden(self):
+        """SGLang's native gen_throughput gauge should not be overridden by delta logic."""
+        client = _mock_client(SGLANG_METRICS_RESPONSE)
+        scraper = GpuMetricsScraper(client, "sglang", sample_interval_ms=50)
+        scraper.start()
+        await asyncio.sleep(0.15)
+        ts = await scraper.stop()
+
+        # All samples should have the native gauge value, not a computed one
+        for s in ts.samples:
+            assert s.generation_throughput == 142.3
 
 
 # ---------------------------------------------------------------------------
