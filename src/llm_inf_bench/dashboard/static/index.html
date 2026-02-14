@@ -1224,7 +1224,7 @@ function dashboard() {
         line: { color: '#6c5ce7', width: 1.5 },
       }], {
         ...layout,
-        yaxis: { ...layout.yaxis, title: '%', range: [0, 100] },
+        yaxis: { ...layout.yaxis, title: '%', rangemode: 'tozero' },
         xaxis: { ...layout.xaxis, title: 'Time (s)' },
       }, CHART_CONFIG);
 
@@ -1395,7 +1395,7 @@ function dashboard() {
         line: { color: '#6c5ce7', width: 1.5 },
       }], {
         ...layout,
-        yaxis: { ...layout.yaxis, title: '%', range: [0, 100] },
+        yaxis: { ...layout.yaxis, title: '%', rangemode: 'tozero' },
         xaxis: { ...layout.xaxis, title: 'Time (s)' },
       }, CHART_CONFIG);
 
@@ -1462,7 +1462,7 @@ function dashboard() {
       Plotly.newPlot('compare-kv', [
         { x: a.ts, y: a.kv, type: 'scatter', mode: 'lines', name: 'A', line: { color: '#6c5ce7', width: 1.5 } },
         { x: b.ts, y: b.kv, type: 'scatter', mode: 'lines', name: 'B', line: { color: '#00b894', width: 1.5 } },
-      ], { ...layout, yaxis: { ...layout.yaxis, title: '%', range: [0, 100] } }, CHART_CONFIG);
+      ], { ...layout, yaxis: { ...layout.yaxis, title: '%', rangemode: 'tozero' } }, CHART_CONFIG);
 
       // Active requests
       Plotly.newPlot('compare-reqs', [
