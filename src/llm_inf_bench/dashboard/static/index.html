@@ -520,6 +520,8 @@
         </div>
       </template>
 
+      <label>Run Name (optional)</label>
+      <input type="text" x-model="runName" placeholder="Custom name..." style="margin-bottom: 10px;">
       <label>Server URL (optional)</label>
       <input type="text" x-model="serverUrl" placeholder="https://..." style="margin-bottom: 10px;">
       <template x-if="!isRunning">
@@ -834,6 +836,7 @@ function dashboard() {
     configs: [],
     selectedConfig: '',
     serverUrl: '',
+    runName: '',
     sidebarOpen: true,
     configPreview: null,
     configPreviewLoading: false,
@@ -1173,6 +1176,7 @@ function dashboard() {
         type: 'start_experiment',
         config_path: this.selectedConfig,
         server_url: this.serverUrl || null,
+        run_name: this.runName || null,
       }));
     },
 

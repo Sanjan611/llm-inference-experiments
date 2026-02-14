@@ -179,10 +179,12 @@ def create_app() -> FastAPI:
                 if msg_type == "start_experiment":
                     config_path = msg.get("config_path", "")
                     server_url = msg.get("server_url") or None
+                    run_name = msg.get("run_name") or None
                     try:
                         run_id = await em.start_experiment(
                             config_path=config_path,
                             server_url=server_url,
+                            run_name=run_name,
                         )
                         await ws.send_json(
                             {

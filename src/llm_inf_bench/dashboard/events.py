@@ -71,6 +71,7 @@ class StartExperimentCommand(BaseModel):
     type: str = "start_experiment"
     config_path: str
     server_url: str | None = None
+    run_name: str | None = None
     confirm: bool = True
 
 
